@@ -17,7 +17,7 @@ export function githubAuthorizeUrl(clientId: string, redirectUri: string, state:
   return url;
 }
 
-export type GithubUser = { login: string; id: number };
+export type GithubUser = { login: string; id: number; name?: string };
 
 export async function exchangeGithubCode(
   clientId: string,
@@ -50,9 +50,9 @@ export async function fetchGithubUser(userToken: string, fetcher: Fetcher): Prom
     signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) throw new Error(`the GitHub user endpoint answered ${res.status}`);
-  const doc = (await res.json()) as { login?: unknown; id?: unknown };
+  const doc = (await res.json()) as { login?: unknown; id?: unknown; name?: unknown };
   if (typeof doc.login !== "string" || typeof doc.id !== "number") throw new Error("the GitHub user document carried no login/id");
-  return { login: doc.login, id: doc.id };
+  return { login: doc.login, id: doc.id, name: typeof doc.name === "string" && doc.name.trim() ? doc.name.trim() : undefined };
 }
 
 export function randomToken(): string {

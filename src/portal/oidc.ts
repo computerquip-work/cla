@@ -142,7 +142,7 @@ export async function exchangeCode(
     } catch {
       // no body to speak of
     }
-    throw new Error(`the token endpoint answered ${res.status}: ${detail} [sent client_id=${clientId}, redirect_uri=${redirectUri}]`);
+    throw new Error(`the token endpoint answered ${res.status}: ${detail} [endpoint=${discovery.token_endpoint} sent client_id=${clientId}, redirect_uri=${redirectUri}]`);
   }
   const doc = (await res.json()) as { id_token?: string };
   if (typeof doc.id_token !== "string" || doc.id_token === "") throw new Error("the token document carried no id_token");

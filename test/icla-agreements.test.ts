@@ -74,8 +74,8 @@ describe("ICLA signing", () => {
   it("signing appends the record bound to the current edition with the election recorded", async () => {
     const res = await app().request("/icla/sign", {
       method: "POST",
-      headers: authed(),
-      body: new URLSearchParams({ terms: "on", past: "yes", csrf, name: "Johannes Roth", email: "johannes@mtg.example", country: "Germany" }),
+      headers: { ...authed(), "cf-connecting-ip": "203.0.113.9" },
+      body: new URLSearchParams({ terms: "on", past: "yes", csrf, name: "Johannes Roth", email: "johannes@mtg.example" }),
     });
     expect(res.status).toBe(200);
     const out = (await res.json()) as Record<string, unknown>;
@@ -85,6 +85,7 @@ describe("ICLA signing", () => {
     const put = fx.calls.find((c) => c.method === "PUT" && c.url.includes("/contents/icla/"));
     expect(put).toBeDefined();
     const record = JSON.parse(Buffer.from((put!.body as Record<string, unknown>)["content"] as string, "base64").toString()) as Record<string, unknown>;
+    expect(record["signed_from_ip"]).toBe("203.0.113.9");
     expect(record).toMatchObject({
       github_login: "tj-91",
       ribose_id_sub: "sub-1",

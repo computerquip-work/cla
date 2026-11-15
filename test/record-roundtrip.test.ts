@@ -79,7 +79,7 @@ describe("data-repo round trip", () => {
     const csrf = newCsrfToken();
     const res = await app.request("/icla/sign", {
       method: "POST",
-      headers: { cookie: `${SESSION_COOKIE}=${session}; ${CSRF_COOKIE}=${csrf}` },
+      headers: { cookie: `${SESSION_COOKIE}=${session}; ${CSRF_COOKIE}=${csrf}`, "cf-connecting-ip": "203.0.113.9" },
       body: new URLSearchParams({
         terms: "on",
         past: "yes",
@@ -95,7 +95,7 @@ describe("data-repo round trip", () => {
     const iclaPath = Object.keys(files).find((p) => p.startsWith("icla/"));
     expect(iclaPath).toBeDefined();
     // the signing form's full details survive into the record
-    expect(files[iclaPath!]).toMatchObject({ name: "Johannes Roth", email: "johannes@mtg.example", country: "Germany" });
+    expect(files[iclaPath!]).toMatchObject({ name: "Johannes Roth", email: "johannes@mtg.example", country: "", signed_from_ip: "203.0.113.9" });
 
     const { snapshot, rejected } = await loadSnapshot(lister(files), EDITIONS);
     expect(rejected).toEqual([]);

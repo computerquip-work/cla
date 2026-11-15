@@ -89,7 +89,11 @@ const canSign = computed(() => terms.value && name.value.trim().length > 0 && re
 // a document that fits without scrolling unlocks immediately).
 const paperEl = ref<HTMLElement | null>(null);
 const readTheAgreement = ref(false);
-const paragraphs = computed(() => (edition.value?.text ?? "").split(/\n{2,}/));
+// The instrument text is hard-wrapped single-newline text (PDF-era
+// wrapping, no blank lines): render line-by-line and give each numbered
+// clause space before it — that is where the paragraphs live.
+const lines = computed(() => (edition.value?.text ?? "").split("\n"));
+const isClauseStart = (line: string): boolean => /^\d+\.\s/.test(line);
 function onPaperScroll(): void {
   const el = paperEl.value;
   if (el === null) return;
@@ -175,7 +179,12 @@ function onPaperScroll(): void {
         class="relative border-l-4 border-brand-400 bg-paper px-8 py-8 text-paper-ink max-h-[72vh] overflow-y-auto"
         @scroll="onPaperScroll"
       >
-        <p v-for="(para, i) in paragraphs" :key="i" class="mb-4 whitespace-pre-line font-serif text-[15px] leading-relaxed last:mb-0">{{ para }}</p>
+        <p
+          v-for="(line, i) in lines"
+          :key="i"
+          class="whitespace-pre-line font-serif text-[15px] leading-relaxed"
+          :class="isClauseStart(line) ? 'mt-6' : ''"
+        >{{ line }}</p>
         <p class="mt-6 font-mono text-xs text-paper-ink/60">ICLA v{{ edition?.version }} · sha256 {{ edition?.sha256 }}</p>
       </div>
 
@@ -197,9 +206,7 @@ function onPaperScroll(): void {
             <span class="leading-relaxed">
               I have read the Agreement and agree to its terms — which
               include <strong>all</strong> my previous contributions to
-              Ribose projects — edition
-              <span class="font-mono text-xs">{{ edition?.version }}</span>,
-              <span class="font-mono text-xs">{{ edition?.sha256?.slice(0, 16) }}…</span>
+              Ribose projects — edition {{ edition?.version }}
             </span>
           </label>
         </div>

@@ -11,7 +11,6 @@ const edition = ref<{ version: string; sha256: string; text: string } | null>(nu
 const terms = ref(false);
 const past = ref(false); // exclusion is not allowed: inclusion is an affirmation, not an election
 const name = ref("");
-const email = ref("");
 
 const error = ref("");
 const signedRecord = ref("");
@@ -58,7 +57,6 @@ onMounted(async () => {
     email_verified: body.email_verified === true,
   };
   name.value = (body.name ?? "").trim();
-  email.value = bound.value.email ?? "";
   phase.value = "form";
 });
 
@@ -66,10 +64,9 @@ async function sign() {
   error.value = "";
   const body = new URLSearchParams({
     csrf: "",
-    terms: terms.value ? "on" : "",
+    terms: "on",
     past: past.value ? "yes" : "",
     name: name.value,
-    email: email.value,
     alt_email: "",
     country: "",
   });
@@ -82,7 +79,7 @@ async function sign() {
     error.value = String(json["error"] ?? `signing failed (${res.status})`);
   }
 }
-const canSign = computed(() => terms.value && name.value.trim().length > 0 && readTheAgreement.value);
+const canSign = computed(() => name.value.trim().length > 0 && readTheAgreement.value);
 
 // The legal-UI contract: the signature unlocks only after the whole
 // instrument has been scrolled to its end (keyboard scrolling included;
@@ -194,22 +191,13 @@ function onPaperScroll(): void {
             <span class="text-slate-500 dark:text-slate-400">Full legal name — typing it is your signature</span>
             <input v-model="name" type="text" autocomplete="name" placeholder="Your full legal name" class="mt-1 w-full rounded-sm border border-rule bg-white dark:bg-ink-2 px-3 py-2 text-ink dark:text-white placeholder:text-slate-400 focus:border-brand-400 focus:outline-none" />
           </label>
-          <label class="block">
-            <span class="text-slate-500 dark:text-slate-400">Email</span>
-            <input v-model="email" type="email" class="mt-1 w-full rounded-sm border border-rule bg-white dark:bg-ink-2 px-3 py-2 text-ink dark:text-white focus:border-brand-400 focus:outline-none" />
-          </label>
         </div>
 
-        <div class="space-y-3 border-t border-rule pt-4 text-sm">
-          <label class="flex items-start gap-2.5">
-            <input v-model="terms" type="checkbox" class="mt-0.5 accent-[#04a9c0]" />
-            <span class="leading-relaxed">
-              I have read the Agreement and agree to its terms — which
-              include <strong>all</strong> my previous contributions to
-              Ribose projects — edition {{ edition?.version }}
-            </span>
-          </label>
-        </div>
+        <p class="border-t border-rule pt-4 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+          The Agreement includes all your previous contributions to Ribose
+          projects. Clicking <strong class="text-ink dark:text-white">AGREE</strong>
+          signs it — edition {{ edition?.version }}.
+        </p>
 
         <p v-if="error" class="rounded-sm border border-accent-600/40 bg-accent-600/10 px-3 py-2 text-sm text-accent-600 dark:text-accent-400" role="alert">{{ error }}</p>
 
@@ -231,7 +219,7 @@ function onPaperScroll(): void {
             class="mt-4 w-full rounded-sm bg-brand-500 px-4 py-3 font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
             @click="sign"
           >
-            {{ name.trim() ? `Sign as ${name.trim()}` : "Sign the agreement" }}
+            AGREE
           </button>
           <p class="mt-2 text-center font-mono text-[11px] text-slate-500 dark:text-slate-400">· · · sign above the line · · ·</p>
         </div>

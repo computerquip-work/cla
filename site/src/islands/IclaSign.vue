@@ -91,13 +91,8 @@ const canSign = computed(() => terms.value && past.value !== "unset" && name.val
   <template v-else-if="phase === 'signin'">
     <div class="grid gap-8 md:grid-cols-[1fr_300px]">
       <div class="relative border-l-4 border-brand-400 bg-paper px-8 py-8 text-paper-ink">
-        <div class="absolute -right-3 top-6 hidden rotate-90 md:block">
-          <span class="font-mono text-[10px] uppercase tracking-[0.25em] text-paper-ink/60">
-            ICLA {{ edition?.version }} · sha256 {{ edition?.sha256 }}
-          </span>
-        </div>
         <pre class="whitespace-pre-wrap font-serif text-[15px] leading-relaxed">{{ edition?.text }}</pre>
-        <p class="mt-6 font-mono text-xs text-paper-ink/60">sha256 {{ edition?.sha256 }}</p>
+        <p class="mt-6 font-mono text-xs text-paper-ink/60">ICLA v{{ edition?.version }} · sha256 {{ edition?.sha256 }}</p>
       </div>
       <aside class="space-y-4">
         <h1 class="font-serif text-2xl font-semibold">Sign the ICLA</h1>
@@ -152,19 +147,16 @@ const canSign = computed(() => terms.value && past.value !== "unset" && name.val
     <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">
       Signing as
       <strong class="text-ink dark:text-white">@{{ bound?.github_login }}</strong>
-      <template v-if="bound?.email">
-        ({{ bound?.email }}{{ bound?.email_verified ? ", verified" : ", unverified" }})
-      </template>
+    </p>
+    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+      <template v-if="bound?.email">{{ bound?.email }} — {{ bound?.email_verified ? "verified" : "unverified" }}<template v-if="!bound?.email_verified"> — <a class="underline underline-offset-2" href="https://id.ribose.com/account">verify it in your Ribose ID account console</a></template></template>
+      <template v-else>no email on the identity account</template>
     </p>
 
     <div class="mt-6 grid gap-8 md:grid-cols-[1fr_300px]">
       <div class="relative border-l-4 border-brand-400 bg-paper px-8 py-8 text-paper-ink">
-        <div class="absolute -right-3 top-6 hidden rotate-90 md:block">
-          <span class="font-mono text-[10px] uppercase tracking-[0.25em] text-paper-ink/60">
-            ICLA {{ edition?.version }} · sha256 {{ edition?.sha256 }}
-          </span>
-        </div>
         <pre class="whitespace-pre-wrap font-serif text-[15px] leading-relaxed">{{ edition?.text }}</pre>
+        <p class="mt-6 font-mono text-xs text-paper-ink/60">ICLA v{{ edition?.version }} · sha256 {{ edition?.sha256 }}</p>
       </div>
 
       <aside class="space-y-6">

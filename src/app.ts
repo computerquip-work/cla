@@ -311,7 +311,7 @@ ${links}
       if (!csrfOk(c.req.header("cookie"), form["csrf"] as string)) return c.json({ error: "csrf mismatch" }, 403);
       if (form["terms"] !== "on") return c.json({ error: "the CLA terms consent is required" }, 400);
       const pastIncluded = form["past"] === "yes";
-      if (!pastIncluded && form["past_declined"] !== "yes") return c.json({ error: "the past-contributions election is required (affirm, or decline explicitly)" }, 400);
+      if (!pastIncluded) return c.json({ error: "the past-contributions affirmation is required — the Agreement includes all previous contributions; exclusion is not allowed" }, 400);
       const legalName = String(form["name"] ?? "").trim();
       if (!legalName) return c.json({ error: "your full legal name is required — it is the signature" }, 400);
 

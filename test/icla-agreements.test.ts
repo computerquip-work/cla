@@ -99,14 +99,14 @@ describe("ICLA signing", () => {
     });
   });
 
-  it("an explicit decline records past_contributions_included: false", async () => {
+  it("an explicit decline is no longer possible: exclusion is not allowed", async () => {
     const res = await app().request("/icla/sign", {
       method: "POST",
       headers: authed(),
       body: new URLSearchParams({ terms: "on", past_declined: "yes", csrf, name: "Johannes Roth" }),
     });
-    expect(res.status).toBe(200);
-    expect(((await res.json()) as Record<string, unknown>)["past_contributions_included"]).toBe(false);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string })["error"]).toContain("exclusion is not allowed");
   });
 });
 

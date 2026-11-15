@@ -166,12 +166,7 @@ async function sign() {
 
       <aside class="space-y-6">
         <div class="relative border-l-4 border-brand-400 bg-paper px-6 py-6 text-paper-ink">
-          <div class="absolute -right-3 top-5 hidden rotate-90 lg:block">
-            <span class="font-mono text-[10px] uppercase tracking-[0.25em] text-paper-ink/60">
-              OCLA {{ edition?.version }} · sha256 {{ edition?.sha256 }}
-            </span>
-          </div>
-          <h2 class="font-mono text-xs uppercase tracking-[0.18em] text-paper-ink/60">the instrument</h2>
+          <h2 class="font-mono text-xs uppercase tracking-[0.18em] text-paper-ink/60">the instrument — OCLA v{{ edition?.version }} · sha256 {{ edition?.sha256?.slice(0, 16) }}…</h2>
           <pre class="mt-3 max-h-[28rem] overflow-y-auto whitespace-pre-wrap font-serif text-[13px] leading-relaxed">{{ edition?.text }}</pre>
         </div>
 

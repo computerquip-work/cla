@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
+import { beforeEach } from "vitest";
 import { verifyWebhookSignature, parseEvent } from "../src/github/webhook";
 import { conclusionFor, commentBody, COMMENT_MARKER, CHECK_NAME } from "../src/enforcement/checks";
 import { fetchPrCommitters } from "../src/github/pulls";
@@ -182,6 +183,65 @@ describe("installation pre-registration", () => {
     expect(res.status).toBe(200);
     const check = fx.calls.find((c) => c.method === "POST" && c.url.endsWith("/repos/org/repo/check-runs"));
     expect(check!.body).toMatchObject({ name: CHECK_NAME, conclusion: "neutral", head_sha: "def456" });
+  });
+});
+
+describe("check_run rerequested: re-run re-evaluates NOW", () => {
+  let pem: string;
+  let fx: Fixture;
+  beforeEach(async () => {
+    pem = await makeKeyPem();
+    fx = makeFixture();
+  });
+
+  const app = () => createApp({
+    GITHUB_APP_ID: "1",
+    APP_PRIVATE_KEY: pem,
+    WEBHOOK_SECRET,
+    OIDC_CLIENT_SECRET: "op-secret",
+  }, { fetcher: fx.fetcher });
+
+  const deliver = async (payload: Record<string, unknown>) => {
+    const raw = JSON.stringify(payload);
+    const sig = await hmacHex(WEBHOOK_SECRET, raw);
+    return app().request("/api/github/webhook", {
+      method: "POST",
+      body: raw,
+      headers: { "content-type": "application/json", "x-github-event": "check_run", "x-hub-signature-256": `sha256=${sig}` },
+    });
+  };
+
+  const rerequested = (name: string, pr: number) => ({
+    action: "rerequested",
+    installation: { id: 42 },
+    repository: { full_name: "rnpgp/rnp" },
+    check_run: { name, head_sha: "sha-1", pull_requests: [{ number: pr }] },
+  });
+
+  it("our check re-evaluates the PR (check run + comment posted)", async () => {
+    fx.routes.set("/repos/rnpgp/rnp/issues/1/comments", (_url, init) =>
+      new Response(JSON.stringify(init?.method === "POST" ? { id: 1 } : []), {
+        status: init?.method === "POST" ? 201 : 200,
+        headers: { "content-type": "application/json" },
+      }));
+    fx.routes.set("/repos/example-org/cla-data/git/trees/HEAD", () =>
+      new Response(JSON.stringify({ tree: [] }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const res = await deliver(rerequested("cla/ribose", 1));
+    expect(res.status).toBe(200);
+    const out = (await res.json()) as Record<string, unknown>;
+    expect(out["ok"]).toBe(true);
+    const created = fx.calls.filter((c) => c.method === "POST" && c.url.includes("/check-runs"));
+    expect(created.length).toBe(1);
+    expect(fx.calls.some((c) => c.method === "POST" && c.url.includes("/issues/1/comments"))).toBe(true);
+  });
+
+  it("another app's check is ignored", async () => {
+    const res = await deliver(rerequested("some-other-check", 1));
+    expect(res.status).toBe(200);
+    const out = (await res.json()) as Record<string, unknown>;
+    expect(out["ignored"]).toContain("not ours");
+    expect(fx.calls.filter((c) => c.method === "POST" && c.url.includes("/check-runs")).length).toBe(0);
   });
 });
 

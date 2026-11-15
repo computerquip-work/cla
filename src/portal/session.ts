@@ -19,6 +19,7 @@ export type SessionClaims = {
   sub: string; // Ribose ID subject
   login: string; // verified GitHub handle (lowercase)
   githubId: number;
+  name?: string; // GitHub profile display name (prefills the legal-name field)
   email?: string;
   emailVerified?: boolean;
   exp: number; // unix seconds

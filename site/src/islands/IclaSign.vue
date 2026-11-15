@@ -45,6 +45,7 @@ onMounted(async () => {
   // /agreements returns {bound:{...}, email, email_verified, ...}
   const body = (await me.json()) as {
     bound?: { github_login?: string };
+    name?: string | null;
     email?: string | null;
     email_verified?: boolean;
   };
@@ -53,7 +54,7 @@ onMounted(async () => {
     email: body.email ?? null,
     email_verified: body.email_verified === true,
   };
-  name.value = bound.value.github_login;
+  name.value = (body.name ?? "").trim() || bound.value.github_login;
   email.value = bound.value.email ?? "";
   phase.value = "form";
 });

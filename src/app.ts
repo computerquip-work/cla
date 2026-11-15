@@ -6,6 +6,7 @@ import { GENERATED_CONFIG } from "./generated/config";
 import { parseEvent, verifyWebhookSignature, installationId, repoFullName } from "./github/webhook";
 import { GithubApi } from "./github/api";
 import { evaluatePullRequest, closeMergedPullRequest, handleAgreeCommand, preRegisterRepos, type EnforcementDeps } from "./enforcement/handler";
+import { CHECK_NAME } from "./enforcement/checks";
 import { discover, authorizationRequest, exchangeCode, verifyIdToken, resetOidcCaches } from "./portal/oidc";
 import { githubAuthorizeUrl, exchangeGithubCode, fetchGithubUser, randomToken } from "./portal/github-oauth";
 import { SESSION_COOKIE, CSRF_COOKIE, makeSessionCookie, readSessionCookie, makeStateCookie, readStateCookie, newCsrfToken } from "./portal/session";
@@ -151,6 +152,23 @@ ${links}
           const r = await handleAgreeCommand(deps, { installationId: inst, repoFullName: repo, prNumber: number, commenter, prAuthor });
           return c.json({ ok: true, replied: r.replied, reason: r.reason });
         }
+        if (evt.event === "check_run" && evt.action === "rerequested") {
+          // A maintainer clicked "Re-run" on our check: evaluate NOW, so
+          // the refresh reflects signatures that landed since the last run.
+          const run = evt.payload["check_run"] as Record<string, unknown> | undefined;
+          const name = typeof run?.["name"] === "string" ? (run["name"] as string) : undefined;
+          if (name !== CHECK_NAME) return c.json({ ok: true, ignored: "check_run/rerequested (not ours)" });
+          const prs = Array.isArray(run?.["pull_requests"]) ? (run!["pull_requests"] as Array<Record<string, unknown>>) : [];
+          const number = prs[0]?.["number"];
+          const repo = repoFullName(evt.payload);
+          const inst = installationId(evt.payload);
+          const sha = typeof run?.["head_sha"] === "string" ? (run["head_sha"] as string) : undefined;
+          if (!repo || !inst || typeof number !== "number" || !sha) {
+            return c.json({ error: "payload missing expected fields" }, 400);
+          }
+          const r = await evaluatePullRequest(deps, { installationId: inst, repoFullName: repo, prNumber: number, headSha: sha });
+          return c.json({ ok: true, outcome: r.outcome });
+        }
         if ((evt.event === "installation_repositories" && evt.action === "added") || (evt.event === "installation" && evt.action === "created")) {
           const inst = installationId(evt.payload);
           if (!inst) return c.json({ error: "payload missing installation id" }, 400);
@@ -199,7 +217,7 @@ ${links}
       const discovery = await discover(identity.issuer, fetcher, now());
       const redirectUri = `${portalBase}/callback/ribose`;
       const auth = await authorizationRequest(discovery, identity.clientId, redirectUri, randomToken);
-      c.header("Set-Cookie", `cla_flow=${await makeStateCookie(env.OIDC_CLIENT_SECRET!, { flow: "ribose", state: auth.state, verifier: auth.verifier, ghLogin: user.login.toLowerCase(), ghId: String(user.id), ...(flow["next"] ? { next: flow["next"] } : {}), ...(flow["tlogin"] ? { tlogin: flow["tlogin"] } : {}) }, now())}${cookieOpts(600)}`);
+      c.header("Set-Cookie", `cla_flow=${await makeStateCookie(env.OIDC_CLIENT_SECRET!, { flow: "ribose", state: auth.state, verifier: auth.verifier, ghLogin: user.login.toLowerCase(), ghId: String(user.id), ...(user.name ? { ghName: user.name } : {}), ...(flow["next"] ? { next: flow["next"] } : {}), ...(flow["tlogin"] ? { tlogin: flow["tlogin"] } : {}) }, now())}${cookieOpts(600)}`);
       return c.redirect(auth.url.toString());
     });
 
@@ -243,6 +261,7 @@ ${links}
       const view = await signerView(env, fetcher, now, session.login);
       return c.json({
         bound: { ribose_id_sub: session.sub, github_login: session.login, github_id: session.githubId },
+        name: session.name ?? null,
         email: session.email ?? null,
         email_verified: session.emailVerified === true,
         ...view,

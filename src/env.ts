@@ -18,6 +18,10 @@ export type Env = {
   OPS_TOKEN?: string;
   /** D1 (join-request queue + ephemeral state). */
   DB?: D1Database;
+  /** The identity service, bound directly (service binding): the
+   *  portal's OIDC calls ride env.IDENTITY.fetch() when wired — same-
+   *  account delivery with no public-edge detour. Unset: plain fetch. */
+  IDENTITY?: Fetcher;
   /** Resend-shaped mail provider; unset = honest no-op (notify leg). */
   MAIL_PROVIDER_URL?: string;
   MAIL_PROVIDER_KEY?: string;

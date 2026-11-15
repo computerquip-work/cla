@@ -257,6 +257,12 @@ ${links}
       return c.redirect(`${portalBase}${flow["next"] ?? "/agreements"}`);
     });
 
+    app.get("/logout", (c) => {
+      c.header("Set-Cookie", `${SESSION_COOKIE}=; Path=/; HttpOnly; Max-Age=0`, { append: true });
+      c.header("Set-Cookie", `${CSRF_COOKIE}=; Path=/; HttpOnly; Max-Age=0`, { append: true });
+      return c.redirect(`${portalBase}/`, 303);
+    });
+
     // ---- My agreements + ICLA signing (docs/design.md §4) ----
     const ses = async (c: { req: { header: (h: string) => string | undefined } }) => sessionOf(env, c.req.header("cookie"), now());
 

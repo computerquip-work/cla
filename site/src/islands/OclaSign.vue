@@ -30,7 +30,21 @@ const gateOk = computed(() => Boolean(me.value?.emailVerified && sessionEmailDom
 const pocOnDomain = computed(() => domainList.value.includes(pocEmail.value.split("@")[1]?.toLowerCase() ?? ""));
 const signatoryOnDomain = computed(() => domainList.value.includes(signatoryEmail.value.split("@")[1]?.toLowerCase() ?? ""));
 const rows = computed(() => scheduleA.value.split("\n").map((l) => l.trim()).filter(Boolean));
-const canSign = computed(() => terms.value && orgName.value && domainList.value.length > 0 && pocOnDomain.value && signatoryOnDomain.value && rows.value.length > 0);
+const canSign = computed(() => terms.value && orgName.value && domainList.value.length > 0 && pocOnDomain.value && signatoryOnDomain.value && rows.value.length > 0 && readTheAgreement.value);
+
+// The legal-UI contract: scroll the instrument to its end before the
+// signature unlocks (a document that fits unlocks immediately).
+const instrumentEl = ref<HTMLElement | null>(null);
+const readTheAgreement = ref(false);
+const lines = computed(() => (edition?.text ?? "").split("\n"));
+const isSectionStart = (line: string): boolean => /^\d+\.\s/.test(line);
+function onInstrumentScroll(): void {
+  const el = instrumentEl.value;
+  if (el === null) return;
+  if (el.scrollHeight <= el.clientHeight + 4 || el.scrollTop + el.clientHeight >= el.scrollHeight - 8) {
+    readTheAgreement.value = true;
+  }
+}
 
 onMounted(async () => {
   const editions = await fetch("/api/editions").then((r) => r.json());
@@ -165,9 +179,18 @@ async function sign() {
       </div>
 
       <aside class="space-y-6">
-        <div class="relative border-l-4 border-brand-400 bg-paper px-6 py-6 text-paper-ink">
+        <div
+          ref="instrumentEl"
+          class="relative border-l-4 border-brand-400 bg-paper px-6 py-6 text-paper-ink max-h-[28rem] overflow-y-auto"
+          @scroll="onInstrumentScroll"
+        >
           <h2 class="font-mono text-xs uppercase tracking-[0.18em] text-paper-ink/60">the instrument — OCLA v{{ edition?.version }} · sha256 {{ edition?.sha256?.slice(0, 16) }}…</h2>
-          <pre class="mt-3 max-h-[28rem] overflow-y-auto whitespace-pre-wrap font-serif text-[13px] leading-relaxed">{{ edition?.text }}</pre>
+          <p
+            v-for="(line, i) in lines"
+            :key="i"
+            class="whitespace-pre-line font-serif text-[13px] leading-relaxed"
+            :class="isSectionStart(line) ? 'mt-5' : ''"
+          >{{ line }}</p>
         </div>
 
         <div class="space-y-3 text-sm">

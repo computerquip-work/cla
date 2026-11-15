@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** The ICLA signing island: session → edition text on paper → two
  *  consents → the signature line. Honest states throughout. */
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 
 type Phase = "checking" | "signin" | "form" | "done" | "error";
 const phase = ref<Phase>("checking");
@@ -12,10 +12,10 @@ const terms = ref(false);
 const past = ref(false); // exclusion is not allowed: inclusion is an affirmation, not an election
 const name = ref("");
 const email = ref("");
-const altEmail = ref("");
-const country = ref("");
+
 const error = ref("");
 const signedRecord = ref("");
+
 
 onMounted(async () => {
   const editions = await fetch("/api/editions").then((r) => r.json());
@@ -23,7 +23,10 @@ onMounted(async () => {
 
   // The edition text is public: render the paper before sign-in.
   const text = await fetch(`/api/agreements/text/icla/${current.version}`);
-  if (text.ok) edition.value = await text.json();
+  if (text.ok) {
+    edition.value = await text.json();
+    void nextTick(onPaperScroll);
+  }
 
   const me = await fetch("/api/agreements");
   if (me.status === 404) {
@@ -67,8 +70,8 @@ async function sign() {
     past: past.value ? "yes" : "",
     name: name.value,
     email: email.value,
-    alt_email: altEmail.value,
-    country: country.value,
+    alt_email: "",
+    country: "",
   });
   const res = await fetch("/api/icla/sign", { method: "POST", body });
   const json = (await res.json()) as Record<string, unknown>;
@@ -79,7 +82,21 @@ async function sign() {
     error.value = String(json["error"] ?? `signing failed (${res.status})`);
   }
 }
-const canSign = computed(() => terms.value && past.value && name.value.trim().length > 0);
+const canSign = computed(() => terms.value && name.value.trim().length > 0 && readTheAgreement.value);
+
+// The legal-UI contract: the signature unlocks only after the whole
+// instrument has been scrolled to its end (keyboard scrolling included;
+// a document that fits without scrolling unlocks immediately).
+const paperEl = ref<HTMLElement | null>(null);
+const readTheAgreement = ref(false);
+const paragraphs = computed(() => (edition.value?.text ?? "").split(/\n{2,}/));
+function onPaperScroll(): void {
+  const el = paperEl.value;
+  if (el === null) return;
+  if (el.scrollHeight <= el.clientHeight + 4 || el.scrollTop + el.clientHeight >= el.scrollHeight - 8) {
+    readTheAgreement.value = true;
+  }
+}
 </script>
 
 <template>
@@ -153,8 +170,12 @@ const canSign = computed(() => terms.value && past.value && name.value.trim().le
     </p>
 
     <div class="mt-6 grid gap-8 md:grid-cols-[1fr_300px]">
-      <div class="relative border-l-4 border-brand-400 bg-paper px-8 py-8 text-paper-ink">
-        <pre class="whitespace-pre-wrap font-serif text-[15px] leading-relaxed">{{ edition?.text }}</pre>
+      <div
+        ref="paperEl"
+        class="relative border-l-4 border-brand-400 bg-paper px-8 py-8 text-paper-ink max-h-[72vh] overflow-y-auto"
+        @scroll="onPaperScroll"
+      >
+        <p v-for="(para, i) in paragraphs" :key="i" class="mb-4 whitespace-pre-line font-serif text-[15px] leading-relaxed last:mb-0">{{ para }}</p>
         <p class="mt-6 font-mono text-xs text-paper-ink/60">ICLA v{{ edition?.version }} · sha256 {{ edition?.sha256 }}</p>
       </div>
 
@@ -168,28 +189,18 @@ const canSign = computed(() => terms.value && past.value && name.value.trim().le
             <span class="text-slate-500 dark:text-slate-400">Email</span>
             <input v-model="email" type="email" class="mt-1 w-full rounded-sm border border-rule bg-white dark:bg-ink-2 px-3 py-2 text-ink dark:text-white focus:border-brand-400 focus:outline-none" />
           </label>
-          <label class="block">
-            <span class="text-slate-500 dark:text-slate-400">Alternative email</span>
-            <input v-model="altEmail" type="email" class="mt-1 w-full rounded-sm border border-rule bg-white dark:bg-ink-2 px-3 py-2 text-ink dark:text-white focus:border-brand-400 focus:outline-none" />
-          </label>
-          <label class="block">
-            <span class="text-slate-500 dark:text-slate-400">Country</span>
-            <input v-model="country" type="text" class="mt-1 w-full rounded-sm border border-rule bg-white dark:bg-ink-2 px-3 py-2 text-ink dark:text-white focus:border-brand-400 focus:outline-none" />
-          </label>
         </div>
 
         <div class="space-y-3 border-t border-rule pt-4 text-sm">
           <label class="flex items-start gap-2.5">
             <input v-model="terms" type="checkbox" class="mt-0.5 accent-[#04a9c0]" />
             <span class="leading-relaxed">
-              I agree to the terms above — edition
+              I have read the Agreement and agree to its terms — which
+              include <strong>all</strong> my previous contributions to
+              Ribose projects — edition
               <span class="font-mono text-xs">{{ edition?.version }}</span>,
               <span class="font-mono text-xs">{{ edition?.sha256?.slice(0, 16) }}…</span>
             </span>
-          </label>
-          <label class="flex items-start gap-2.5">
-            <input v-model="past" type="checkbox" class="mt-0.5 accent-[#04a9c0]" />
-            <span class="leading-relaxed">This agreement includes <strong>all</strong> my previous contributions to Ribose projects</span>
           </label>
         </div>
 
@@ -205,6 +216,9 @@ const canSign = computed(() => terms.value && past.value && name.value.trim().le
               bound to Your verified GitHub handle and Ribose ID, constitutes Your signature.
             </p>
           </div>
+          <p v-if="!readTheAgreement" class="mt-2 text-center text-xs text-slate-500 dark:text-slate-400" aria-live="polite">
+            Scroll the agreement to its end — signing unlocks then.
+          </p>
           <button
             :disabled="!canSign"
             class="mt-4 w-full rounded-sm bg-brand-500 px-4 py-3 font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"

@@ -9,7 +9,7 @@ const dark = ref(false);
 const bound = ref<{ github_login: string; email: string | null; email_verified: boolean } | null>(null);
 const edition = ref<{ version: string; sha256: string; text: string } | null>(null);
 const terms = ref(false);
-const past = ref<"unset" | "yes" | "no">("unset");
+const past = ref(false); // exclusion is not allowed: inclusion is an affirmation, not an election
 const name = ref("");
 const email = ref("");
 const altEmail = ref("");
@@ -54,7 +54,7 @@ onMounted(async () => {
     email: body.email ?? null,
     email_verified: body.email_verified === true,
   };
-  name.value = (body.name ?? "").trim() || bound.value.github_login;
+  name.value = (body.name ?? "").trim();
   email.value = bound.value.email ?? "";
   phase.value = "form";
 });
@@ -64,8 +64,7 @@ async function sign() {
   const body = new URLSearchParams({
     csrf: "",
     terms: terms.value ? "on" : "",
-    past: past.value === "yes" ? "yes" : "",
-    past_declined: past.value === "no" ? "yes" : "",
+    past: past.value ? "yes" : "",
     name: name.value,
     email: email.value,
     alt_email: altEmail.value,
@@ -80,7 +79,7 @@ async function sign() {
     error.value = String(json["error"] ?? `signing failed (${res.status})`);
   }
 }
-const canSign = computed(() => terms.value && past.value !== "unset" && name.value.trim().length > 0);
+const canSign = computed(() => terms.value && past.value && name.value.trim().length > 0);
 </script>
 
 <template>
@@ -162,17 +161,8 @@ const canSign = computed(() => terms.value && past.value !== "unset" && name.val
       <aside class="space-y-6">
         <div class="space-y-3 text-sm">
           <label class="block">
-            <span class="text-slate-500 dark:text-slate-400">GitHub username</span>
-            <input
-              :value="bound?.github_login"
-              type="text"
-              readonly
-              class="mt-1 w-full rounded-sm border border-rule bg-white dark:bg-ink-2 px-3 py-2 font-mono text-sm text-ink dark:text-white opacity-80"
-            />
-          </label>
-          <label class="block">
             <span class="text-slate-500 dark:text-slate-400">Full legal name — typing it is your signature</span>
-            <input v-model="name" type="text" autocomplete="name" class="mt-1 w-full rounded-sm border border-rule bg-white dark:bg-ink-2 px-3 py-2 text-ink dark:text-white focus:border-brand-400 focus:outline-none" />
+            <input v-model="name" type="text" autocomplete="name" placeholder="Your full legal name" class="mt-1 w-full rounded-sm border border-rule bg-white dark:bg-ink-2 px-3 py-2 text-ink dark:text-white placeholder:text-slate-400 focus:border-brand-400 focus:outline-none" />
           </label>
           <label class="block">
             <span class="text-slate-500 dark:text-slate-400">Email</span>
@@ -198,12 +188,8 @@ const canSign = computed(() => terms.value && past.value !== "unset" && name.val
             </span>
           </label>
           <label class="flex items-start gap-2.5">
-            <input v-model="past" type="radio" value="yes" class="mt-0.5 accent-[#04a9c0]" />
+            <input v-model="past" type="checkbox" class="mt-0.5 accent-[#04a9c0]" />
             <span class="leading-relaxed">This agreement includes <strong>all</strong> my previous contributions to Ribose projects</span>
-          </label>
-          <label class="flex items-start gap-2.5">
-            <input v-model="past" type="radio" value="no" class="mt-0.5 accent-[#04a9c0]" />
-            <span class="leading-relaxed text-slate-500 dark:text-slate-400">Exclude my previous contributions (recorded visibly)</span>
           </label>
         </div>
 

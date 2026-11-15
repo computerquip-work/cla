@@ -35,6 +35,11 @@ export function createApp(env: Env, overrides?: { fetcher?: FetchLike; now?: () 
   const fetcher = overrides?.fetcher ?? fetch;
   const identity = GENERATED_CONFIG.identity;
   const portalBase = `https://${GENERATED_CONFIG.instance.portalHost}`;
+  // The identity's OIDC calls ride the service binding when wired —
+  // same-account delivery with no public-edge detour. Unset: plain fetch.
+  const identityFetcher: FetchLike = env.IDENTITY
+    ? ((input, init) => env.IDENTITY!.fetch(typeof input === "string" ? new Request(input, init) : (input as Request)) as Promise<Response>)
+    : fetcher;
   const app = new Hono<{ Bindings: Env }>();
 
   // Current edition pointers (public — versions + hashes only, never
@@ -214,7 +219,7 @@ ${links}
       const token = await exchangeGithubCode(env.GITHUB_APP_CLIENT_ID!, env.GITHUB_APP_CLIENT_SECRET!, code, `${portalBase}/callback/github`, state, fetcher);
       const user = await fetchGithubUser(token, fetcher);
       // Handle proven — now the identity round (JIT via GitHub upstream).
-      const discovery = await discover(identity.issuer, fetcher, now());
+      const discovery = await discover(identity.issuer, identityFetcher, now());
       const redirectUri = `${portalBase}/callback/ribose`;
       const auth = await authorizationRequest(discovery, identity.clientId, redirectUri, randomToken);
       c.header("Set-Cookie", `cla_flow=${await makeStateCookie(env.OIDC_CLIENT_SECRET!, { flow: "ribose", state: auth.state, verifier: auth.verifier, ghLogin: user.login.toLowerCase(), ghId: String(user.id), ...(user.name ? { ghName: user.name } : {}), ...(flow["next"] ? { next: flow["next"] } : {}), ...(flow["tlogin"] ? { tlogin: flow["tlogin"] } : {}) }, now())}${cookieOpts(600)}`);
@@ -229,9 +234,9 @@ ${links}
       if (!flow || flow["flow"] !== "ribose" || !code || !flow["ghLogin"]) {
         return c.json({ error: "invalid or expired sign-in state" }, 400);
       }
-      const discovery = await discover(identity.issuer, fetcher, now());
-      const idToken = await exchangeCode(discovery, identity.clientId, env.OIDC_CLIENT_SECRET!, `${portalBase}/callback/ribose`, code, flow["verifier"]!, fetcher);
-      const claims = await verifyIdToken(discovery, idToken, identity.issuer, identity.clientId, fetcher, now());
+      const discovery = await discover(identity.issuer, identityFetcher, now());
+      const idToken = await exchangeCode(discovery, identity.clientId, env.OIDC_CLIENT_SECRET!, `${portalBase}/callback/ribose`, code, flow["verifier"]!, identityFetcher);
+      const claims = await verifyIdToken(discovery, idToken, identity.issuer, identity.clientId, identityFetcher, now());
 
       // Both identities proven: write the LINK record (append-only).
       const api = new GithubApi({ fetcher, now, appId: env.GITHUB_APP_ID ?? "", privateKeyPem: (env.APP_PRIVATE_KEY ?? "").replaceAll("\\n", "\n"), tokenCache: TOKEN_CACHE, etagCache: ETAG_CACHE });

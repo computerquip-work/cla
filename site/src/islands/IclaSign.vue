@@ -106,7 +106,7 @@ function onPaperScroll(): void {
 
   <!-- not signed in: the paper is shown, the line waits -->
   <template v-else-if="phase === 'signin'">
-    <div class="grid gap-8 md:grid-cols-[1fr_300px]">
+    <div class="grid gap-8 md:grid-cols-[minmax(0,1.9fr)_minmax(280px,1fr)]">
       <div class="relative border-l-4 border-brand-400 bg-paper px-8 py-8 text-paper-ink">
         <pre class="whitespace-pre-wrap font-serif text-[15px] leading-relaxed">{{ edition?.text }}</pre>
         <p class="mt-6 font-mono text-xs text-paper-ink/60">ICLA v{{ edition?.version }} · sha256 {{ edition?.sha256 }}</p>
@@ -170,7 +170,7 @@ function onPaperScroll(): void {
       <template v-else>no email on the identity account</template>
     </p>
 
-    <div class="mt-6 grid gap-8 md:grid-cols-[1fr_300px]">
+    <div class="mt-6 grid gap-8 md:grid-cols-[minmax(0,1.9fr)_minmax(280px,1fr)]">
       <div
         ref="paperEl"
         class="relative border-l-4 border-brand-400 bg-paper px-8 py-8 text-paper-ink max-h-[72vh] overflow-y-auto"
@@ -203,8 +203,8 @@ function onPaperScroll(): void {
 
         <div class="border-t border-rule pt-5">
           <p class="text-sm text-slate-500 dark:text-slate-400">
-            Signing as <strong class="text-ink dark:text-white">{{ name.trim() || "—" }}</strong>
-            — edition {{ edition?.version }}
+            {{ name.trim() ? `Signing as ${name.trim()}` : "Type your full legal name — it is the signature" }}
+            · edition {{ edition?.version }}
           </p>
           <p v-if="!readTheAgreement" class="mt-2 text-center text-xs text-slate-500 dark:text-slate-400" aria-live="polite">
             Scroll the agreement to its end — AGREE unlocks then.
@@ -216,7 +216,6 @@ function onPaperScroll(): void {
           >
             AGREE
           </button>
-          <p class="mt-2 text-center font-mono text-[11px] text-slate-500 dark:text-slate-400">· · · sign above the line · · ·</p>
         </div>
       </aside>
     </div>

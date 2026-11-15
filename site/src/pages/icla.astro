@@ -1,9 +1,8 @@
 ---
-export const prerender = true;
 import Base from "../layouts/Base.astro";
 import IclaSign from "../islands/IclaSign.vue";
 ---
 
-<Base title="Sign the Individual CLA — Ribose CLA">
+<Base title="Sign the Individual CLA — Ribose CLA" wide>
   <IclaSign client:only="vue" />
 </Base>

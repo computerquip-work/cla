@@ -133,7 +133,17 @@ export async function exchangeCode(
     body,
     signal: AbortSignal.timeout(10_000),
   });
-  if (!res.ok) throw new Error(`the token endpoint answered ${res.status}`);
+  if (!res.ok) {
+    // The body names the exact reason (invalid_grant vs invalid_client
+    // vs invalid_request) — without it a failed exchange is undiagnosable.
+    let detail = "";
+    try {
+      detail = (await res.text()).slice(0, 300);
+    } catch {
+      // no body to speak of
+    }
+    throw new Error(`the token endpoint answered ${res.status}: ${detail}`);
+  }
   const doc = (await res.json()) as { id_token?: string };
   if (typeof doc.id_token !== "string" || doc.id_token === "") throw new Error("the token document carried no id_token");
   return doc.id_token;

@@ -201,22 +201,17 @@ function onPaperScroll(): void {
 
         <p v-if="error" class="rounded-sm border border-accent-600/40 bg-accent-600/10 px-3 py-2 text-sm text-accent-600 dark:text-accent-400" role="alert">{{ error }}</p>
 
-        <!-- the signature line: the typed legal name IS the signature -->
         <div class="border-t border-rule pt-5">
-          <div class="rounded-sm border border-rule bg-paper px-4 py-3 text-paper-ink" aria-live="polite">
-            <p class="font-mono text-[10px] uppercase tracking-[0.2em] text-paper-ink/60">Signature</p>
-            <p class="mt-1 font-serif text-xl italic" :class="name.trim() ? '' : 'text-paper-ink/30'">{{ name.trim() || "—" }}</p>
-            <p class="mt-1 text-xs leading-relaxed text-paper-ink/60">
-              By clicking below, You sign this Agreement electronically. Your typed full legal name,
-              bound to Your verified GitHub handle and Ribose ID, constitutes Your signature.
-            </p>
-          </div>
+          <p class="text-sm text-slate-500 dark:text-slate-400">
+            Signing as <strong class="text-ink dark:text-white">{{ name.trim() || "—" }}</strong>
+            — edition {{ edition?.version }}
+          </p>
           <p v-if="!readTheAgreement" class="mt-2 text-center text-xs text-slate-500 dark:text-slate-400" aria-live="polite">
-            Scroll the agreement to its end — signing unlocks then.
+            Scroll the agreement to its end — AGREE unlocks then.
           </p>
           <button
             :disabled="!canSign"
-            class="mt-4 w-full rounded-sm bg-brand-500 px-4 py-3 font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            class="mt-3 w-full rounded-sm bg-brand-500 px-4 py-3 font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
             @click="sign"
           >
             AGREE

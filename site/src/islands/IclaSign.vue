@@ -67,8 +67,8 @@ async function sign() {
     terms: "on",
     past: past.value ? "yes" : "",
     name: name.value,
-    alt_email: "",
-    country: "",
+    alt_email: altEmail.value,
+    country: country.value,
   });
   const res = await fetch("/api/icla/sign", { method: "POST", body });
   const json = (await res.json()) as Record<string, unknown>;
@@ -186,10 +186,35 @@ function onPaperScroll(): void {
       </div>
 
       <aside class="space-y-6">
-        <div class="space-y-3 text-sm">
-          <label class="block">
-            <span class="text-slate-500 dark:text-slate-400">Full legal name — typing it is your signature</span>
-            <input v-model="name" type="text" autocomplete="name" placeholder="Your full legal name" class="mt-1 w-full rounded-sm border border-rule bg-white dark:bg-ink-2 px-3 py-2 text-ink dark:text-white placeholder:text-slate-400 focus:border-brand-400 focus:outline-none" />
+        <div class="space-y-2 text-sm">
+          <p class="font-mono text-[10px] uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">The record — Agreement §Identity</p>
+          <div class="flex items-center justify-between gap-3 rounded-sm border border-rule bg-white dark:bg-ink-2 px-3 py-2">
+            <span class="text-slate-500 dark:text-slate-400">GitHub Username</span>
+            <span class="font-mono text-ink dark:text-white">{{ bound?.github_login }}</span>
+            <span class="text-xs text-emerald-600 dark:text-emerald-400" title="Proven by the GitHub round">confirmed</span>
+          </div>
+          <div class="flex items-center justify-between gap-3 rounded-sm border border-rule bg-white dark:bg-ink-2 px-3 py-2">
+            <span class="text-slate-500 dark:text-slate-400">Email</span>
+            <span class="font-mono text-ink dark:text-white">{{ bound?.email || "—" }}</span>
+            <span :class="bound?.email_verified ? 'text-xs text-emerald-600 dark:text-emerald-400' : 'text-xs text-amber-600 dark:text-amber-400'">{{ bound?.email_verified ? "confirmed" : "unverified" }}</span>
+          </div>
+          <label class="block rounded-sm border border-brand-400 bg-white dark:bg-ink-2 px-3 py-2">
+            <span class="text-slate-500 dark:text-slate-400">Name — type it; it is the signature</span>
+            <input v-model="name" type="text" autocomplete="name" placeholder="Your full legal name" class="mt-1 w-full bg-transparent text-ink dark:text-white placeholder:text-slate-400 focus:outline-none" />
+          </label>
+          <div v-if="!showAltEmail && !showCountry" class="pt-1">
+            <button type="button" class="text-xs text-brand-600 underline underline-offset-2 dark:text-brand-400" @click="showAltEmail = true">+ add alternative email</button>
+            <span class="mx-1 text-slate-400">·</span>
+            <button type="button" class="text-xs text-brand-600 underline underline-offset-2 dark:text-brand-400" @click="showCountry = true">+ add country</button>
+            <span class="text-xs text-slate-400">(both optional — Agreement §Identity records them when present)</span>
+          </div>
+          <label v-if="showAltEmail" class="block rounded-sm border border-rule bg-white dark:bg-ink-2 px-3 py-2">
+            <span class="text-slate-500 dark:text-slate-400">Alternative email</span>
+            <input v-model="altEmail" type="email" placeholder="optional" class="mt-1 w-full bg-transparent text-ink dark:text-white placeholder:text-slate-400 focus:outline-none" />
+          </label>
+          <label v-if="showCountry" class="block rounded-sm border border-rule bg-white dark:bg-ink-2 px-3 py-2">
+            <span class="text-slate-500 dark:text-slate-400">Country</span>
+            <input v-model="country" type="text" placeholder="optional" class="mt-1 w-full bg-transparent text-ink dark:text-white placeholder:text-slate-400 focus:outline-none" />
           </label>
         </div>
 

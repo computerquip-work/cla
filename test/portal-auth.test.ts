@@ -144,6 +144,35 @@ describe("portal auth: the dual flow", () => {
     expect(new URLSearchParams(idTokenCall!.body as string).get("client_secret")).toBe("op-secret");
   });
 
+  it("repeated dual flow: an identical LINK binding is not appended twice", async () => {
+    const app = createApp(ENV(pem), { fetcher: fx.fetcher });
+    const runFlow = async () => {
+      const r1 = await app.request("/signin/github");
+      const cb = new URL(r1.headers.get("location")!);
+      const r2 = await app.request(`/callback/github?code=abc&state=${cb.searchParams.get("state")}`, { headers: { cookie: `cla_flow=${cookieOf(r1, "cla_flow")}` } });
+      const authUrl = new URL(r2.headers.get("location")!);
+      return app.request(`/callback/ribose?code=oidc-code&state=${authUrl.searchParams.get("state")}`, { headers: { cookie: `cla_flow=${cookieOf(r2, "cla_flow")}` } });
+    };
+
+    const linkPuts = () => fx.calls.filter((c) => c.method === "PUT" && c.url.includes("/contents/link/"));
+    expect((await runFlow()).status).toBe(302);
+    expect(linkPuts()).toHaveLength(1);
+
+    // the first record is in the data repo at the second sign-in
+    fx.routes.set("/repos/example-org/cla-data/git/trees/HEAD", () =>
+      Response.json({ tree: [{ path: "link/2026/11/existing.json", type: "blob" }] }, { status: 200, headers: { etag: '"w2"' } }),
+    );
+    fx.routes.set("/repos/example-org/cla-data/contents/link/2026/11/existing.json", () =>
+      Response.json({
+        content: Buffer.from(JSON.stringify({ id: "existing", ribose_id_sub: "ribose-sub-1", github_login: "tj-91", github_id: GH_USER.id, linked_at: "2026-11-15T00:00:00Z", source: "portal-dual-flow" })).toString("base64"),
+        encoding: "base64",
+      }, { status: 200 }),
+    );
+
+    expect((await runFlow()).status).toBe(302);
+    expect(linkPuts()).toHaveLength(1); // no duplicate
+  });
+
   it("fail-closed: state cookie tampering -> 400", async () => {
     const app = createApp(ENV(pem), { fetcher: fx.fetcher });
     const r = await app.request("/callback/github?code=abc&state=whatever", { headers: { cookie: "cla_flow=tampered.junk" } });

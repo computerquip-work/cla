@@ -11,6 +11,10 @@ const edition = ref<{ version: string; sha256: string; text: string } | null>(nu
 const terms = ref(false);
 const past = ref(false); // exclusion is not allowed: inclusion is an affirmation, not an election
 const name = ref("");
+const altEmail = ref("");
+const country = ref("");
+const showAltEmail = ref(false);
+const showCountry = ref(false);
 
 const error = ref("");
 const signedRecord = ref("");
@@ -58,10 +62,7 @@ onMounted(async () => {
   };
   name.value = (body.name ?? "").trim();
   phase.value = "form";
-  void nextTick(() => {
-    onPaperScroll();
-    observePaperEnd();
-  });
+  void nextTick(observePaperEnd);
 });
 
 async function sign() {
@@ -90,7 +91,7 @@ const canSign = computed(() => name.value.trim().length > 0 && readTheAgreement.
 // by scrolling the page, or because the document fits. The observer
 // watches the provenance line; the scroll handler covers the paper's
 // own inner scroller.
-const paperEl = ref<HTMLElement | null>(null);
+const endMarkEl = ref<HTMLElement | null>(null);
 const readTheAgreement = ref(false);
 let endObserver: IntersectionObserver | undefined;
 // The instrument text carries one paragraph per line (the counsel
@@ -102,20 +103,10 @@ const lines = computed(() =>
     .split("\n")
     .filter((line) => !/^\s*(GitHub Username|Name|Email|Alternative email|Country):\s*$/.test(line)),
 );
-function onPaperScroll(): void {
-  const el = paperEl.value;
-  if (el === null) return;
-  if (el.scrollHeight <= el.clientHeight + 4 || el.scrollTop + el.clientHeight >= el.scrollHeight - 8) {
-    readTheAgreement.value = true;
-  }
-}
-
 function observePaperEnd(): void {
   endObserver?.disconnect();
-  const el = paperEl.value;
+  const el = endMarkEl.value;
   if (el === null) return;
-  const endLine = el.lastElementChild;
-  if (endLine === null) return;
   endObserver = new IntersectionObserver(
     (entries) => {
       if (entries.some((entry) => entry.isIntersecting)) {
@@ -123,9 +114,9 @@ function observePaperEnd(): void {
         endObserver?.disconnect();
       }
     },
-    { threshold: 0.9 },
+    { threshold: 1 },
   );
-  endObserver.observe(endLine);
+  endObserver.observe(el);
 }
 </script>
 
@@ -138,7 +129,7 @@ function observePaperEnd(): void {
     <div class="grid gap-8 md:grid-cols-[minmax(0,1.9fr)_minmax(280px,1fr)]">
       <div class="relative border-l-4 border-brand-400 bg-paper px-8 py-8 text-paper-ink">
         <pre class="whitespace-pre-wrap font-serif text-[15px] leading-relaxed">{{ edition?.text }}</pre>
-        <p class="mt-6 font-mono text-xs text-paper-ink/60">ICLA v{{ edition?.version }} · sha256 {{ edition?.sha256 }}</p>
+        <p ref="endMarkEl" class="mt-6 font-mono text-xs text-paper-ink/60">ICLA v{{ edition?.version }} · sha256 {{ edition?.sha256 }} — end of the Agreement</p>
       </div>
       <aside class="space-y-4">
         <h1 class="font-serif text-2xl font-semibold">Sign the ICLA</h1>
@@ -202,18 +193,17 @@ function observePaperEnd(): void {
     <div class="mt-6 grid gap-8 md:grid-cols-[minmax(0,1.9fr)_minmax(280px,1fr)]">
       <div
         ref="paperEl"
-        class="relative border-l-4 border-brand-400 bg-paper px-8 py-8 text-paper-ink max-h-[72vh] overflow-y-auto"
-        @scroll="onPaperScroll"
+        class="relative border-l-4 border-brand-400 bg-paper px-8 py-8 text-paper-ink"
       >
         <p
           v-for="(line, i) in lines"
           :key="i"
           class="mb-5 whitespace-pre-line font-serif text-[15px] leading-relaxed last:mb-0"
         >{{ line }}</p>
-        <p class="mt-6 font-mono text-xs text-paper-ink/60">ICLA v{{ edition?.version }} · sha256 {{ edition?.sha256 }}</p>
+        <p ref="endMarkEl" class="mt-6 font-mono text-xs text-paper-ink/60">ICLA v{{ edition?.version }} · sha256 {{ edition?.sha256 }} — end of the Agreement</p>
       </div>
 
-      <aside class="space-y-6">
+      <aside class="space-y-6 md:sticky md:top-24 md:self-start">
         <div class="space-y-2 text-sm">
           <p class="font-mono text-[10px] uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">The record — Agreement §Identity</p>
           <div class="flex items-center justify-between gap-3 rounded-sm border border-rule bg-white dark:bg-ink-2 px-3 py-2">
@@ -259,8 +249,8 @@ function observePaperEnd(): void {
             {{ name.trim() ? `Signing as ${name.trim()}` : "Type your full legal name — it is the signature" }}
             · edition {{ edition?.version }}
           </p>
-          <p v-if="!readTheAgreement" class="mt-2 text-center text-xs text-slate-500 dark:text-slate-400" aria-live="polite">
-            Scroll the agreement to its end — AGREE unlocks then.
+          <p v-if="!readTheAgreement" class="mt-2 text-center text-sm font-medium text-amber-600 dark:text-amber-400" aria-live="polite">
+            ↓ Scroll down through the full agreement — AGREE unlocks at the end.
           </p>
           <button
             :disabled="!canSign"

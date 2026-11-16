@@ -150,13 +150,74 @@ async function postBotReply(api: GithubApi, installationId: number, repoFullName
   const res = await api.request(installationId, "POST", `/repos/${repoFullName}/issues/${prNumber}/comments`, { body: { body } });
   if (res.status !== 201) throw new Error(`bot reply failed: ${res.status}`);
 }
-/** installation_repositories.added / installation.created — pre-register the check name per repo. */
-export async function preRegisterRepos(deps: EnforcementDeps, installationId: number, repos: string[]): Promise<string[]> {
-  const done: string[] = [];
-  for (const repo of repos) {
-    if (deps.config.coverage.reposWithoutCla.includes(repo.toLowerCase())) continue;
-    await preRegisterCheck(deps.api, installationId, repo);
-    done.push(repo);
+/**
+ * Pre-registration is bounded because a single installation can cover a
+ * whole large organisation: each repo costs four GitHub subrequests
+ * (info, head, existing-run probe, create), so an unbounded loop over
+ * hundreds of repos blows the invocation budget and never finishes.
+ */
+export const PRE_REGISTER_BATCH = 25;
+
+export type PreRegisterOutcome = {
+  done: string[];
+  failed: Array<{ repo: string; reason: string }>;
+  /** Repos this batch did not attempt — the caller finishes them. */
+  deferred: string[];
+};
+
+/** installation_repositories.added / installation.created — pre-register a bounded batch. */
+export async function preRegisterRepos(
+  deps: EnforcementDeps,
+  installationId: number,
+  repos: string[],
+  opts: { limit?: number } = {},
+): Promise<PreRegisterOutcome> {
+  const limit = opts.limit ?? PRE_REGISTER_BATCH;
+  const wanted = repos.filter((repo) => !deps.config.coverage.reposWithoutCla.includes(repo.toLowerCase()));
+  const batch = wanted.slice(0, limit);
+  const outcome: PreRegisterOutcome = { done: [], failed: [], deferred: wanted.slice(limit) };
+  for (const repo of batch) {
+    try {
+      await preRegisterCheck(deps.api, installationId, repo);
+      outcome.done.push(repo);
+    } catch (e) {
+      // One repo's failure must not strand the rest of the installation;
+      // the failures are reported, never swallowed.
+      outcome.failed.push({ repo, reason: (e as Error).message });
+    }
   }
-  return done;
+  return outcome;
+}
+
+export type PreRegisterCursor = { page: number; offset: number };
+
+/**
+ * Finish pre-registration across a whole installation, one bounded step
+ * at a time: walks `GET /installation/repositories` page by page, and
+ * hands back the `next` cursor for the following call (null = done).
+ * Steps are idempotent, so an interrupted or repeated backfill converges.
+ * This is the completion path for orgs too large for one webhook delivery.
+ */
+export async function preRegisterInstallation(
+  deps: EnforcementDeps,
+  installationId: number,
+  cursor: PreRegisterCursor = { page: 1, offset: 0 },
+  chunk: number = PRE_REGISTER_BATCH,
+): Promise<PreRegisterOutcome & { total: number; next: PreRegisterCursor | null }> {
+  const PER_PAGE = 100;
+  const list = await deps.api.request(installationId, "GET", `/installation/repositories?per_page=${PER_PAGE}&page=${cursor.page}`);
+  if (list.status !== 200) throw new Error(`installation repository listing failed: ${list.status}`);
+  const body = JSON.parse(list.body) as { total_count?: number; repositories?: Array<{ full_name?: string }> };
+  const page = (body.repositories ?? []).map((r) => r.full_name).filter((n): n is string => typeof n === "string");
+  const slice = page.slice(cursor.offset, cursor.offset + chunk);
+  const outcome = await preRegisterRepos(deps, installationId, slice, { limit: chunk });
+
+  const consumed = cursor.offset + slice.length;
+  const next: PreRegisterCursor | null =
+    page.length === 0 || (consumed >= page.length && page.length < PER_PAGE)
+      ? null
+      : consumed >= page.length
+        ? { page: cursor.page + 1, offset: 0 }
+        : { page: cursor.page, offset: consumed };
+  return { ...outcome, total: body.total_count ?? page.length, next };
 }

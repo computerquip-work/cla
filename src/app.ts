@@ -5,7 +5,7 @@ import type { FetchLike } from "./github/api";
 import { GENERATED_CONFIG } from "./generated/config";
 import { parseEvent, verifyWebhookSignature, installationId, repoFullName } from "./github/webhook";
 import { GithubApi } from "./github/api";
-import { evaluatePullRequest, closeMergedPullRequest, handleAgreeCommand, preRegisterRepos, type EnforcementDeps } from "./enforcement/handler";
+import { evaluatePullRequest, closeMergedPullRequest, handleAgreeCommand, preRegisterRepos, preRegisterInstallation, PRE_REGISTER_BATCH, type EnforcementDeps } from "./enforcement/handler";
 import { CHECK_NAME } from "./enforcement/checks";
 import { discover, authorizationRequest, exchangeCode, verifyIdToken, resetOidcCaches } from "./portal/oidc";
 import { githubAuthorizeUrl, exchangeGithubCode, fetchGithubUser, randomToken } from "./portal/github-oauth";
@@ -181,8 +181,16 @@ ${links}
             evt.event === "installation"
               ? reposFromInstallation(evt.payload)
               : (evt.payload["repositories_added"] as Array<Record<string, unknown>> | undefined)?.map((r) => r["full_name"] as string).filter(Boolean) ?? [];
-          const done = await preRegisterRepos(deps, inst, repos);
-          return c.json({ ok: true, preregistered: done });
+          const outcome = await preRegisterRepos(deps, inst, repos);
+          // Systemic failure (every repo failed) stays an honest 503 so
+          // GitHub redelivers; partial failure is reported, not thrown,
+          // and the deferred remainder is finished by POST /admin/preregister
+          // (idempotent) rather than by a redelivery that would replay the
+          // same batch from the start.
+          if (outcome.done.length === 0 && outcome.failed.length > 0) {
+            return c.json({ error: `pre-registration failed: ${outcome.failed[0]!.reason}`, failed: outcome.failed }, 503);
+          }
+          return c.json({ ok: true, preregistered: outcome.done, failed: outcome.failed, deferred: outcome.deferred.length });
         }
         return c.json({ ok: true, ignored: `${evt.event}/${evt.action ?? "*"}` });
       } catch (e) {
@@ -755,6 +763,21 @@ ${links}
       });
       await ops(c, "void", targetId, reason);
       return c.json({ voided: targetId, record: path });
+    });
+
+    app.post("/admin/preregister", async (c) => {
+      if (!opsGuard(c)) return c.json({ error: "forbidden" }, 403);
+      const body = (await opsForm(c)) as Record<string, unknown>;
+      const inst = Number(body["installation_id"]);
+      if (!Number.isInteger(inst) || inst <= 0) return c.json({ error: "installation_id is required" }, 400);
+      const chunk = Math.min(Math.max(Number(body["limit"] ?? PRE_REGISTER_BATCH) || PRE_REGISTER_BATCH, 1), 100);
+      const cur = (body["cursor"] ?? {}) as Record<string, unknown>;
+      const cursor = { page: Math.max(Number(cur["page"] ?? 1) || 1, 1), offset: Math.max(Number(cur["offset"] ?? 0) || 0, 0) };
+      // Coverage remedy for orgs too large for one webhook delivery: one
+      // bounded step per call; feed `next` back until it is null.
+      const r = await preRegisterInstallation({ api: portalApi(env, fetcher, now), config: GENERATED_CONFIG }, inst, cursor, chunk);
+      await ops(c, "preregister", String(inst), `page=${cursor.page} offset=${cursor.offset} done=${r.done.length} failed=${r.failed.length} next=${r.next ? "yes" : "no"}`);
+      return c.json(r);
     });
 
     app.post("/admin/backfill-ocla", async (c) => {

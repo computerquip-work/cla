@@ -137,6 +137,11 @@ export async function upsertComment(
  * Pre-registration (docs/design.md §3.13): on installation/repo-added,
  * post a NEUTRAL `cla/ribose` run on the default branch HEAD so the
  * check name is requirable in branch protection immediately.
+ *
+ * Idempotent: a resumed backfill (or a redelivered webhook) must not
+ * stack duplicate neutral runs on the same commit, so an existing run
+ * named `cla/ribose` short-circuits. A failed probe is not fatal — the
+ * create below is the point, and would surface the same error.
  */
 export async function preRegisterCheck(api: GithubApi, installationId: number, repoFullName: string): Promise<void> {
   const info = await api.request(installationId, "GET", `/repos/${repoFullName}`);
@@ -147,6 +152,15 @@ export async function preRegisterCheck(api: GithubApi, installationId: number, r
   if (head.status !== 200) throw new Error(`head commit lookup failed: ${head.status}`);
   const sha = (JSON.parse(head.body) as { sha?: string }).sha;
   if (!sha) throw new Error("head commit has no sha");
+  const existing = await api.request(
+    installationId,
+    "GET",
+    `/repos/${repoFullName}/commits/${encodeURIComponent(def)}/check-runs?check_name=${encodeURIComponent(CHECK_NAME)}`,
+  );
+  if (existing.status === 200) {
+    const runs = (JSON.parse(existing.body) as { check_runs?: unknown[] }).check_runs;
+    if (Array.isArray(runs) && runs.length > 0) return;
+  }
   await createCheckRun(api, installationId, repoFullName, sha, {
     name: CHECK_NAME,
     status: "completed",

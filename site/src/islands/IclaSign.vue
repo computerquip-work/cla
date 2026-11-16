@@ -250,7 +250,7 @@ function observePaperEnd(): void {
             · edition {{ edition?.version }}
           </p>
           <p v-if="!readTheAgreement" class="mt-2 text-center text-sm font-medium text-amber-600 dark:text-amber-400" aria-live="polite">
-            ↓ Scroll down through the full agreement — AGREE unlocks at the end.
+            Scroll down through the full Agreement; the AGREE button unlocks at its end.
           </p>
           <button
             :disabled="!canSign"

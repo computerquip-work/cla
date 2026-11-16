@@ -9,7 +9,6 @@ const dark = ref(false);
 const bound = ref<{ github_login: string; email: string | null; email_verified: boolean } | null>(null);
 const edition = ref<{ version: string; sha256: string; text: string } | null>(null);
 const terms = ref(false);
-const past = ref(false); // exclusion is not allowed: inclusion is an affirmation, not an election
 const name = ref("");
 const altEmail = ref("");
 const country = ref("");
@@ -72,7 +71,9 @@ async function sign() {
   const body = new URLSearchParams({
     csrf: csrfToken(),
     terms: "on",
-    past: past.value ? "yes" : "",
+    // The Agreement includes all previous contributions: exclusion is not
+    // allowed and the signature affirms inclusion (no election to make).
+    past: "yes",
     name: name.value,
     alt_email: altEmail.value,
     country: country.value,

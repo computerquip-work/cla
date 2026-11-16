@@ -227,6 +227,7 @@ ${links}
     });
 
     app.get("/callback/ribose", async (c) => {
+      try {
       const cookieHeader = c.req.header("cookie") ?? "";
       const readCookie = (name: string) => cookieHeader.split(";").find((x) => x.trim().startsWith(`${name}=`))?.split("=").slice(1).join("=");
       const flow = await readStateCookie(env.OIDC_CLIENT_SECRET!, readCookie("cla_flow"), now());
@@ -255,6 +256,18 @@ ${links}
         return c.json({ error: "only the committer may complete this signature" }, 403);
       }
       return c.redirect(`${portalBase}${flow["next"] ?? "/agreements"}`);
+      } catch (error) {
+        // The failure lands in the audit with its reason, and the signer
+        // sees an honest error page — never a bare 500.
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("callback/ribose failed:", message);
+        try {
+          await audit(env.DB, { actor: "portal", action: "callback_failed", target: "ribose", detail: message.slice(0, 300), at: new Date(now()).toISOString(), id: randomToken() });
+        } catch {
+          // the audit is best-effort; the page is the promise
+        }
+        return c.html(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Sign-in failed</title></head><body style="font-family:sans-serif;max-width:40em;margin:4em auto;line-height:1.5"><h1>The sign-in round failed</h1><p>The identity service answered an error during the sign-in round: <code>${message.replace(/[<>&]/g, "")}</code>.</p><p>Start again from <a href="/signin/github">the signing page</a>. If it repeats, the failure is recorded — contact the maintainers with the time of the attempt.</p></body></html>`);
+      }
     });
 
     app.get("/logout", (c) => {

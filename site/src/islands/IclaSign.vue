@@ -58,6 +58,10 @@ onMounted(async () => {
   };
   name.value = (body.name ?? "").trim();
   phase.value = "form";
+  void nextTick(() => {
+    onPaperScroll();
+    observePaperEnd();
+  });
 });
 
 async function sign() {
@@ -81,22 +85,47 @@ async function sign() {
 }
 const canSign = computed(() => name.value.trim().length > 0 && readTheAgreement.value);
 
-// The legal-UI contract: the signature unlocks only after the whole
-// instrument has been scrolled to its end (keyboard scrolling included;
-// a document that fits without scrolling unlocks immediately).
+// The legal-UI contract: the signature unlocks only after the end of
+// the instrument has actually been on screen — by scrolling the paper,
+// by scrolling the page, or because the document fits. The observer
+// watches the provenance line; the scroll handler covers the paper's
+// own inner scroller.
 const paperEl = ref<HTMLElement | null>(null);
 const readTheAgreement = ref(false);
-// The instrument text is hard-wrapped single-newline text (PDF-era
-// wrapping, no blank lines): render line-by-line and give each numbered
-// clause space before it — that is where the paragraphs live.
-const lines = computed(() => (edition.value?.text ?? "").split("\n"));
-const isClauseStart = (line: string): boolean => /^\d+\.\s/.test(line);
+let endObserver: IntersectionObserver | undefined;
+// The instrument text carries one paragraph per line (the counsel
+// 1.0 shape): render line-by-line with paragraph margins between all
+// of them. The trailing identity block is NOT rendered — the
+// interactive record card beside the paper is that block.
+const lines = computed(() =>
+  (edition.value?.text ?? "")
+    .split("\n")
+    .filter((line) => !/^\s*(GitHub Username|Name|Email|Alternative email|Country):\s*$/.test(line)),
+);
 function onPaperScroll(): void {
   const el = paperEl.value;
   if (el === null) return;
   if (el.scrollHeight <= el.clientHeight + 4 || el.scrollTop + el.clientHeight >= el.scrollHeight - 8) {
     readTheAgreement.value = true;
   }
+}
+
+function observePaperEnd(): void {
+  endObserver?.disconnect();
+  const el = paperEl.value;
+  if (el === null) return;
+  const endLine = el.lastElementChild;
+  if (endLine === null) return;
+  endObserver = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        readTheAgreement.value = true;
+        endObserver?.disconnect();
+      }
+    },
+    { threshold: 0.9 },
+  );
+  endObserver.observe(endLine);
 }
 </script>
 
@@ -137,8 +166,10 @@ function onPaperScroll(): void {
               </p>
             </div>
             <p>
-              First, prove your GitHub handle — GitHub, then your Ribose ID, then straight
-              back to this signature line. About a minute.
+              Signing verifies two identities in one pass: the GitHub handle,
+              through GitHub itself, and the Ribose ID account — created
+              automatically when none exists — which holds the association
+              permanently.
             </p>
           </div>
           <a
@@ -149,9 +180,7 @@ function onPaperScroll(): void {
             Sign in with GitHub
           </a>
           <p class="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-            You'll pass through your Ribose ID (created automatically if
-            you don't have one) — that's what binds this signature to a
-            durable identity, not just a handle.
+            The signature line returns after both verifications complete.
           </p>
         </template>
       </aside>
@@ -179,8 +208,7 @@ function onPaperScroll(): void {
         <p
           v-for="(line, i) in lines"
           :key="i"
-          class="whitespace-pre-line font-serif text-[15px] leading-relaxed"
-          :class="isClauseStart(line) ? 'mt-6' : ''"
+          class="mb-5 whitespace-pre-line font-serif text-[15px] leading-relaxed last:mb-0"
         >{{ line }}</p>
         <p class="mt-6 font-mono text-xs text-paper-ink/60">ICLA v{{ edition?.version }} · sha256 {{ edition?.sha256 }}</p>
       </div>

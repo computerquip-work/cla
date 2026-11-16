@@ -4,6 +4,29 @@
 import astroWorker from "./dist/server/entry.mjs";
 import { createApp } from "../src/app";
 
+// The site-wide Content-Security-Policy (task: parity with the
+// identity service). The islands need inline bootstrap scripts; forms
+// post same-origin only.
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  "font-src 'self'",
+  "connect-src 'self'",
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join("; ");
+
+const withCsp = (response) => {
+  const res = new Response(response.body, response);
+  res.headers.set("Content-Security-Policy", CSP);
+  res.headers.set("X-Content-Type-Options", "nosniff");
+  res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  return res;
+};
+
 export default {
   async fetch(request, env, ctx) {
     // createApp gates its webhook + portal routes on the REAL env.
@@ -37,6 +60,6 @@ export default {
       return apiApp.fetch(inner, env, ctx);
     }
 
-    return astroWorker.fetch(request, env, ctx);
+    return withCsp(await astroWorker.fetch(request, env, ctx));
   },
 };

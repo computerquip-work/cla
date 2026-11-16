@@ -28,7 +28,6 @@ onMounted(async () => {
   const text = await fetch(`/api/agreements/text/icla/${current.version}`);
   if (text.ok) {
     edition.value = await text.json();
-    void nextTick(onPaperScroll);
   }
 
   const me = await fetch("/api/agreements");
@@ -122,7 +121,9 @@ function observePaperEnd(): void {
 
 <template>
   <!-- checking -->
-  <p v-if="phase === 'checking'" class="text-slate-500 dark:text-slate-400">Reading the instrument…</p>
+  <p v-if="phase === 'checking'" class="text-slate-500 dark:text-slate-400">
+    The Agreement is loading. The signing form appears below it.
+  </p>
 
   <!-- not signed in: the paper is shown, the line waits -->
   <template v-else-if="phase === 'signin'">

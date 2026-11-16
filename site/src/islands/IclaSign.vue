@@ -196,6 +196,9 @@ function observePaperEnd(): void {
         ref="paperEl"
         class="relative border-l-4 border-brand-400 bg-paper px-8 py-8 text-paper-ink"
       >
+        <div v-if="!readTheAgreement" class="sticky top-0 z-10 -mx-8 mb-5 bg-brand-500 px-8 py-2.5 text-center text-sm font-medium text-white">
+          Scroll down through the full Agreement — the AGREE button unlocks at its end.
+        </div>
         <p
           v-for="(line, i) in lines"
           :key="i"

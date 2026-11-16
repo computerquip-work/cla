@@ -75,7 +75,7 @@ async function sign() {
   const body = new URLSearchParams({
     csrf: csrfFromCookie(),
     terms: "on",
-    past: past.value ? "yes" : "",
+    past: "yes", // the AGREE click affirms the statement above, which carries the clause
     name: name.value,
     alt_email: altEmail.value,
     country: country.value,

@@ -60,10 +60,15 @@ onMounted(async () => {
   phase.value = "form";
 });
 
+function csrfFromCookie(): string {
+  const pair = document.cookie.split(";").find((x) => x.trim().startsWith("cla_csrf="));
+  return pair ? pair.split("=").slice(1).join("=") : "";
+}
+
 async function sign() {
   error.value = "";
   const body = new URLSearchParams({
-    csrf: "",
+    csrf: csrfFromCookie(),
     terms: "on",
     past: past.value ? "yes" : "",
     org_name: orgName.value,

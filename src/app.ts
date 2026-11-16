@@ -197,6 +197,10 @@ ${links}
   // ---- Portal (fail-closed: identity secret + GitHub client id configured) ----
   if (env.OIDC_CLIENT_SECRET && env.GITHUB_APP_CLIENT_ID && env.GITHUB_APP_CLIENT_SECRET) {
     const cookieOpts = (maxAge: number) => `; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
+    // The CSRF half of the double-submit pattern is read back by the
+    // island's script, so it carries no HttpOnly (2026-11-15: HttpOnly
+    // on it made every interactive signature die on "csrf mismatch").
+    const csrfCookieOpts = (maxAge: number) => `; Path=/; Secure; SameSite=Lax; Max-Age=${maxAge}`;
 
     app.get("/signin/github", async (c) => {
       const state = randomToken();
@@ -249,7 +253,7 @@ ${links}
 
       const csrf = newCsrfToken();
       c.header("Set-Cookie", `${SESSION_COOKIE}=${await makeSessionCookie(env.OIDC_CLIENT_SECRET!, { sub: claims.sub, login: flow["ghLogin"], githubId: Number(flow["ghId"]), email: typeof claims.email === "string" ? claims.email : undefined, emailVerified: claims.email_verified === true }, now())}${cookieOpts(8 * 3600)}`);
-      c.header("Set-Cookie", `${CSRF_COOKIE}=${csrf}${cookieOpts(8 * 3600)}`, { append: true });
+      c.header("Set-Cookie", `${CSRF_COOKIE}=${csrf}${csrfCookieOpts(8 * 3600)}`, { append: true });
       c.header("Set-Cookie", `cla_flow=; Path=/; HttpOnly; Max-Age=0`, { append: true });
       // a completion flow insists the proven handle is the invited login
       if (flow["tlogin"] && flow["tlogin"] !== flow["ghLogin"]) {

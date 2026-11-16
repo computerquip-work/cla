@@ -242,12 +242,23 @@ ${links}
       const claims = await verifyIdToken(discovery, idToken, identity.issuer, identity.clientId, identityFetcher, now());
 
       // Both identities proven: write the LINK record (append-only).
+      // A repeated sign-in must NOT append a second identical binding:
+      // the existing (github_id, sub, login) record is already the truth.
       const api = new GithubApi({ fetcher, now, appId: env.GITHUB_APP_ID ?? "", privateKeyPem: (env.APP_PRIVATE_KEY ?? "").replaceAll("\\n", "\n"), tokenCache: TOKEN_CACHE, etagCache: ETAG_CACHE });
-      await appendRecord(
-        { api, installationId: GENERATED_CONFIG.github.dataInstallationId, dataRepo: GENERATED_CONFIG.github.dataRepo, now },
-        "link",
-        { ribose_id_sub: claims.sub, github_login: flow["ghLogin"], github_id: Number(flow["ghId"]), linked_at: new Date(now()).toISOString(), source: "portal-dual-flow" },
+      const githubId = Number(flow["ghId"]);
+      const ghLogin = String(flow["ghLogin"]);
+      const { links } = await loadSnapshot(
+        { listRecords: makeListRecords(api, GENERATED_CONFIG.github.dataInstallationId, GENERATED_CONFIG.github.dataRepo, ["link/"]) },
+        kernelEditions(GENERATED_CONFIG),
       );
+      const alreadyLinked = links.some((l) => l.githubId === githubId && l.riboseSub === claims.sub && l.githubLogin.toLowerCase() === ghLogin.toLowerCase());
+      if (!alreadyLinked) {
+        await appendRecord(
+          { api, installationId: GENERATED_CONFIG.github.dataInstallationId, dataRepo: GENERATED_CONFIG.github.dataRepo, now },
+          "link",
+          { ribose_id_sub: claims.sub, github_login: ghLogin, github_id: githubId, linked_at: new Date(now()).toISOString(), source: "portal-dual-flow" },
+        );
+      }
 
       const csrf = newCsrfToken();
       c.header("Set-Cookie", `${SESSION_COOKIE}=${await makeSessionCookie(env.OIDC_CLIENT_SECRET!, { sub: claims.sub, login: flow["ghLogin"], githubId: Number(flow["ghId"]), email: typeof claims.email === "string" ? claims.email : undefined, emailVerified: claims.email_verified === true }, now())}${cookieOpts(8 * 3600)}`);

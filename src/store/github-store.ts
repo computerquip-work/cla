@@ -9,13 +9,13 @@ import type { GithubApi } from "../github/api";
 
 const RECORD_NAMESPACES = ["icla/", "ocla/", "ocla-mod/", "revocation/", "attribution/", "role/", "link/"];
 
-export function makeListRecords(api: GithubApi, installationId: number, dataRepo: string): StoreDeps["listRecords"] {
+export function makeListRecords(api: GithubApi, installationId: number, dataRepo: string, namespaces: readonly string[] = RECORD_NAMESPACES): StoreDeps["listRecords"] {
   return async (): Promise<RecordLister> => {
     const tree = await api.request(installationId, "GET", `/repos/${dataRepo}/git/trees/HEAD?recursive=1`, { etagPath: `tree:${dataRepo}:HEAD` });
     if (tree.status !== 200) throw new Error(`data repo tree listing failed: ${tree.status}`);
     const parsed = JSON.parse(tree.body) as { tree?: Array<{ path?: string; type?: string }> };
     const paths = (parsed.tree ?? [])
-      .filter((e) => e.type === "blob" && typeof e.path === "string" && e.path.endsWith(".json") && RECORD_NAMESPACES.some((ns) => e.path!.startsWith(ns)))
+      .filter((e) => e.type === "blob" && typeof e.path === "string" && e.path.endsWith(".json") && namespaces.some((ns) => e.path!.startsWith(ns)))
       .map((e) => e.path!);
 
     const blobs = new Map<string, string>();

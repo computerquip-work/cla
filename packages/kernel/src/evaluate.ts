@@ -203,13 +203,21 @@ export function evaluate(pr: PrInput, snap: StoreSnapshot, cfg: Config, editions
       const match = chosen ? paths.find((p) => agreementKey(p.agreement!) === agreementKey(chosen.agreement)) : undefined;
       if (match) {
         committers.push({ login: resolvedLogin, status: "covered", path: match.path, agreement: match.agreement, matchedBy, ...(separate ? { underSeparateAgreement: true } : {}) });
-      } else {
+      } else if (resolvedLogin) {
         committers.push({ login: resolvedLogin, status: "must-specify", options, matchedBy });
-        if (resolvedLogin) mustSpecify[resolvedLogin] = options;
+        mustSpecify[resolvedLogin] = options;
+      } else {
+        // Two agreements match an unlinked committer: there is no login to
+        // ask, so review cannot resolve it — fail closed instead of passing.
+        committers.push({ login: null, status: "missing" });
+        missing.push(c.email ? `email:${c.email}` : "unlinked");
       }
     } else {
       committers.push({ login: resolvedLogin, status: "missing" });
-      if (resolvedLogin) missing.push(resolvedLogin);
+      // An email-only committer is still a committer: GitHub could not link
+      // the commit to an account, and that must fail closed — the verdict is
+      // derived from `missing`, so a null login must not drop out of it.
+      missing.push(resolvedLogin ?? (c.email ? `email:${c.email}` : "unlinked"));
     }
   }
 

@@ -188,6 +188,36 @@ describe("kernel: unlinked-email fallback", () => {
     const v = evaluate(pr([{ login: null, email: "unknown@example.com" }]), snapshot(), config(), EDITIONS);
     expect(v.committers[0]?.status).toBe("missing");
   });
+
+  it("an uncovered unlinked committer fails the PR, not just its row", () => {
+    const v = evaluate(pr([{ login: null, email: "unknown@example.com" }]), snapshot(), config(), EDITIONS);
+    expect(v.verdict).toBe("fail");
+    expect(v.missing).toEqual(["email:unknown@example.com"]);
+  });
+
+  it("a covered login plus an uncovered unlinked committer fails the PR", () => {
+    const v = evaluate(
+      pr([login("tj-91"), { login: null, email: "unknown@example.com" }]),
+      snapshot({ oclas: [ocla()] }),
+      config(),
+      EDITIONS,
+    );
+    expect(v.verdict).toBe("fail");
+    expect(v.missing).toEqual(["email:unknown@example.com"]);
+  });
+
+  it("an unlinked committer matched by two agreements fails: there is no login to ask", () => {
+    const second = ocla({ id: "ocla-2", orgSlug: "other-org", covered: [{ githubLogin: "someone", email: "unknown@example.com" }] });
+    const v = evaluate(
+      pr([{ login: null, email: "unknown@example.com" }]),
+      snapshot({ iclas: [icla({ email: "unknown@example.com" })], oclas: [second] }),
+      config(),
+      EDITIONS,
+    );
+    expect(v.verdict).toBe("fail");
+    expect(v.committers[0]?.status).toBe("missing");
+    expect(v.mustSpecify).toEqual({});
+  });
 });
 
 describe("kernel: attribution elections resolve must-specify", () => {

@@ -7,6 +7,7 @@ import { parseEvent, verifyWebhookSignature, installationId, repoFullName } from
 import { GithubApi } from "./github/api";
 import { evaluatePullRequest, closeMergedPullRequest, handleAgreeCommand, handleThirdPartyCommand, preRegisterRepos, preRegisterInstallation, PRE_REGISTER_BATCH, type EnforcementDeps } from "./enforcement/handler";
 import { enqueueSweepFor, drainSweepStep } from "./enforcement/sweep";
+import { repoCoverageStep, DEFAULT_REPOS_PER_STEP, DEFAULT_COMMIT_WINDOW } from "./enforcement/report";
 import { CHECK_NAME } from "./enforcement/checks";
 import { discover, authorizationRequest, exchangeCode, verifyIdToken, resetOidcCaches } from "./portal/oidc";
 import { githubAuthorizeUrl, exchangeGithubCode, fetchGithubUser, randomToken } from "./portal/github-oauth";
@@ -863,6 +864,23 @@ export function createApp(env: Env, overrides?: { fetcher?: FetchLike; now?: () 
       const r = await preRegisterInstallation({ api: portalApi(env, fetcher, now), config: GENERATED_CONFIG }, inst, cursor, chunk);
       await ops(c, "preregister", String(inst), `page=${cursor.page} offset=${cursor.offset} done=${r.done.length} failed=${r.failed.length} next=${r.next ? "yes" : "no"}`);
       return c.json(r);
+    });
+
+    // The repo-centric coverage report (issue #88): repos x people x
+    // state, one bounded step per call, cursor-persisting. Read-only.
+    app.get("/admin/repos-coverage", async (c) => {
+      if (!opsGuard(c)) return c.json({ error: "forbidden" }, 403);
+      const inst = Number(c.req.query("installation_id"));
+      if (!Number.isInteger(inst) || inst <= 0) return c.json({ error: "installation_id is required" }, 400);
+      const clamp = (v: string | undefined, lo: number, hi: number, dflt: number) => {
+        const n = Number(v ?? dflt);
+        return Number.isFinite(n) ? Math.min(Math.max(Math.trunc(n), lo), hi) : dflt;
+      };
+      const chunk = clamp(c.req.query("limit"), 1, 50, DEFAULT_REPOS_PER_STEP);
+      const window = clamp(c.req.query("window"), 1, 100, DEFAULT_COMMIT_WINDOW);
+      const cursor = { page: clamp(c.req.query("page"), 1, 100000, 1), offset: clamp(c.req.query("offset"), 0, 100000, 0) };
+      const report = await repoCoverageStep({ api: portalApi(env, fetcher, now), config: GENERATED_CONFIG }, inst, cursor, chunk, window);
+      return c.json(report);
     });
 
     app.post("/admin/backfill-ocla", async (c) => {

@@ -54,9 +54,11 @@ export default {
     }
 
     // The site's protocol calls (/api/icla/sign, /api/agreements, ...)
-    // map to the Hono routes with /api stripped.
+    // map to the Hono routes with /api stripped. The search string must
+    // ride along: a rebuilt URL without it drops every query parameter
+    // (the repos-coverage cursor, filters, pagination).
     if (url.pathname.startsWith("/api/")) {
-      const inner = new Request(new URL(url.pathname.replace(/^\/api/, "") || "/", url.origin), request);
+      const inner = new Request(new URL((url.pathname.replace(/^\/api/, "") || "/") + url.search, url.origin), request);
       return apiApp.fetch(inner, env, ctx);
     }
 

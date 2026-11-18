@@ -1,7 +1,8 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import type { Config, Editions, StoreSnapshot } from "@riboseinc/cla-kernel";
 import { createApp } from "../src/app";
-import { repoRow } from "../src/enforcement/report";
+import { repoRow, licenseFromResponse } from "../src/enforcement/report";
+import type { RepoLicense } from "../src/enforcement/report";
 import { makeFixture, makeKeyPem, CURRENT_EDITIONS, DATA_OCLA, type Fixture } from "./helpers";
 
 /**
@@ -20,6 +21,9 @@ const EDITIONS: Editions = {
 };
 
 const snap = (over: Partial<StoreSnapshot> = {}): StoreSnapshot => ({ iclas: [], oclas: [], revokedIds: [], ...over });
+
+/** What the report reads when Licensee says the repo has no license file. */
+const NO_LICENSE: RepoLicense = { spdx: null, state: "none" };
 
 const icla = (over: Partial<StoreSnapshot["iclas"][number]> = {}): StoreSnapshot["iclas"][number] => ({
   id: "icla-tj",
@@ -61,6 +65,7 @@ describe("repos-coverage: the person table", () => {
       cfg({ perOrg: { org: ["estate-release-manager"] } }),
       EDITIONS,
       25,
+      NO_LICENSE,
     );
     const by = (l: string) => row.contributors.find((c) => c.login === l);
     expect(by("falko-strenzke")).toMatchObject({ state: "signed", path: "ocla", edition: CURRENT_EDITIONS.ocla.version });
@@ -71,7 +76,7 @@ describe("repos-coverage: the person table", () => {
 
   it("a signature on an older edition reads stale, not outstanding", () => {
     const stale = snap({ iclas: [icla({ edition: { kind: "icla", version: "0.9", textSha256: "older-sha" } })] });
-    const row = repoRow("org/repo", true, [commit("tj-91", "johannes@mtg.example"), commit("stranger", "s@x.example")], stale, cfg(), EDITIONS, 25);
+    const row = repoRow("org/repo", true, [commit("tj-91", "johannes@mtg.example"), commit("stranger", "s@x.example")], stale, cfg(), EDITIONS, 25, NO_LICENSE);
     expect(row.contributors.find((c) => c.login === "tj-91")).toMatchObject({ state: "stale" });
     expect(row.contributors.find((c) => c.login === "stranger")).toMatchObject({ state: "outstanding" });
   });
@@ -92,6 +97,7 @@ describe("repos-coverage: the person table", () => {
       cfg(),
       EDITIONS,
       25,
+      NO_LICENSE,
     );
     const by = (l: string) => row.contributors.find((c) => c.login === l);
     // "covered by an OCLA" is not enough for the operator: WHICH OCLA.
@@ -103,14 +109,14 @@ describe("repos-coverage: the person table", () => {
 
   it("two applicable agreements read must-specify with their options", () => {
     const both = snap({ iclas: [icla()], oclas: [ocla({ covered: [{ githubLogin: "tj-91", email: "johannes@mtg.example" }] })] });
-    const row = repoRow("org/repo", true, [commit("tj-91", "johannes@mtg.example")], both, cfg(), EDITIONS, 25);
+    const row = repoRow("org/repo", true, [commit("tj-91", "johannes@mtg.example")], both, cfg(), EDITIONS, 25, NO_LICENSE);
     expect(row.contributors[0]?.state).toBe("must-specify");
     expect(row.contributors[0]?.options).toHaveLength(2);
   });
 
   it("a separate-agreement login is flagged while still reading signed", () => {
     const withRegistry = snap({ oclas: [ocla()], msaLogins: ["falko-strenzke"] });
-    const row = repoRow("org/repo", true, [commit("falko-strenzke", "falko@mtg.example")], withRegistry, cfg(), EDITIONS, 25);
+    const row = repoRow("org/repo", true, [commit("falko-strenzke", "falko@mtg.example")], withRegistry, cfg(), EDITIONS, 25, NO_LICENSE);
     expect(row.contributors[0]).toMatchObject({ login: "falko-strenzke", state: "signed", under_separate_agreement: true });
   });
 
@@ -123,9 +129,38 @@ describe("repos-coverage: the person table", () => {
       cfg(),
       EDITIONS,
       25,
+      NO_LICENSE,
     );
     expect(row.contributors[0]).toMatchObject({ login: null, state: "signed", matched_by: "email" });
     expect(row.contributors[1]).toMatchObject({ login: null, state: "outstanding" });
+  });
+});
+
+describe("repos-coverage: the license inventory (issue #116)", () => {
+  it("a LICENSE reports its SPDX id; no license file is `none`, never an implied permissive default", () => {
+    expect(licenseFromResponse(200, JSON.stringify({ license: { spdx_id: "BUSL-1.1" } }))).toEqual({ spdx: "BUSL-1.1", state: "declared" });
+    expect(licenseFromResponse(404, JSON.stringify({ message: "Not Found" }))).toEqual({ spdx: null, state: "none" });
+  });
+
+  it("a lookup the App could not complete is `unreadable`, distinct from `none`", () => {
+    expect(licenseFromResponse(500, "{}")).toMatchObject({ spdx: null, state: "unreadable" });
+    expect(licenseFromResponse(500, "{}").note).toContain("500");
+    expect(licenseFromResponse(200, "not json")).toMatchObject({ state: "unreadable" });
+    expect(licenseFromResponse(200, JSON.stringify({ license: null }))).toMatchObject({ state: "unreadable" });
+  });
+
+  it("Licensee's NOASSERTION is kept verbatim: a license file exists that it cannot map", () => {
+    expect(licenseFromResponse(200, JSON.stringify({ license: { spdx_id: "NOASSERTION" } }))).toEqual({ spdx: "NOASSERTION", state: "declared" });
+  });
+
+  it("an excluded repo still reports its license, with the excluded scope", () => {
+    const row = repoRow("org/mirror", false, [], snap(), cfg(), EDITIONS, 25, { spdx: "BSD-3-Clause", state: "declared" });
+    expect(row).toMatchObject({ in_scope: false, scope: "excluded", license: { spdx: "BSD-3-Clause" }, contributors: [] });
+  });
+
+  it("an in-scope repo names the standard scope binding", () => {
+    const row = repoRow("org/repo", true, [commit("stranger", "s@x.example")], snap(), cfg(), EDITIONS, 25, { spdx: "BUSL-1.1", state: "declared" });
+    expect(row).toMatchObject({ in_scope: true, scope: "standard", license: { spdx: "BUSL-1.1", state: "declared" } });
   });
 });
 
@@ -172,6 +207,26 @@ describe("repos-coverage: route posture", () => {
     // (issue #104).
     expect(out.notes[1]).toContain(`icla v${CURRENT_EDITIONS.icla.version} sha ${CURRENT_EDITIONS.icla.sha256.slice(0, 8)}`);
     expect(out.notes[1]).toContain(`ocla v${CURRENT_EDITIONS.ocla.version} sha ${CURRENT_EDITIONS.ocla.sha256.slice(0, 8)}`);
+  });
+
+  it("every repo row carries the license inventory and its scope binding", async () => {
+    listRepos(["conormis/platform", "org/unlicensed"]);
+    fx.routes.set("/repos/conormis/platform/license", () => Response.json({ license: { spdx_id: "BUSL-1.1" } }, { status: 200 }));
+    fx.routes.set("/repos/org/unlicensed/license", () => new Response("{}", { status: 404 }));
+    fx.routes.set("/repos/conormis/platform/commits", () => Response.json([commit("tj-91", "johannes@mtg.example")], { status: 200 }));
+    fx.routes.set("/repos/org/unlicensed/commits", () => Response.json([commit("stranger", "s@x.example")], { status: 200 }));
+
+    const out = (await (await get("?installation_id=42")).json()) as any;
+    expect(out.repos[0]).toMatchObject({
+      repo: "conormis/platform",
+      scope: "standard",
+      license: { spdx: "BUSL-1.1", state: "declared" },
+    });
+    expect(out.repos[1]).toMatchObject({
+      repo: "org/unlicensed",
+      scope: "standard",
+      license: { spdx: null, state: "none" },
+    });
   });
 
   it("a stale bundle names itself: the stored edition hash disagrees with the compiled one (issue #104)", async () => {

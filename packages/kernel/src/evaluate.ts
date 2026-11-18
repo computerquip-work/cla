@@ -227,13 +227,28 @@ export function evaluate(pr: PrInput, snap: StoreSnapshot, cfg: Config, editions
       matchedBy = "email";
     }
 
+    // Duplicate live records of the SAME agreement (a double-POST race in
+    // the sign flow wrote two records one second apart, rnpgp/rnp#2573)
+    // must never read as ambiguity: fold the paths by agreement key —
+    // ICLAs collapse to one, an OCLA keeps its record id — so a single
+    // key after folding is coverage, not a question.
+    const folded: typeof paths = [];
+    const seenKeys = new Set<string>();
+    for (const p of paths) {
+      const key = agreementKey(p.agreement!);
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        folded.push(p);
+      }
+    }
+
     // The registry returned above: a login it binds never reaches here, so
     // an ICLA/OCLA path is never flagged as separate-agreement coverage.
-    if (paths.length === 1) {
-      const p = paths[0]!;
+    if (folded.length === 1) {
+      const p = folded[0]!;
       committers.push({ login: resolvedLogin, status: "covered", path: p.path, agreement: p.agreement, matchedBy, ...(c.email && matchedBy === "email" ? { email: c.email } : {}) });
-    } else if (paths.length > 1) {
-      const options = paths.map((p) => p.agreement!).filter(Boolean);
+    } else if (folded.length > 1) {
+      const options = folded.map((p) => p.agreement!).filter(Boolean);
       // A stored election for THIS (repo, pr, login) resolves the ambiguity
       // — but only while the chosen agreement is still among the live paths.
       const chosen = resolvedLogin
@@ -244,7 +259,7 @@ export function evaluate(pr: PrInput, snap: StoreSnapshot, cfg: Config, editions
               normalize(a.login) === normalize(resolvedLogin),
           )
         : undefined;
-      const match = chosen ? paths.find((p) => agreementKey(p.agreement!) === agreementKey(chosen.agreement)) : undefined;
+      const match = chosen ? folded.find((p) => agreementKey(p.agreement!) === agreementKey(chosen.agreement)) : undefined;
       if (match) {
         committers.push({ login: resolvedLogin, status: "covered", path: match.path, agreement: match.agreement, matchedBy, ...(c.email && matchedBy === "email" ? { email: c.email } : {}) });
       } else if (resolvedLogin) {

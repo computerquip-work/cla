@@ -13,7 +13,7 @@ import { discover, authorizationRequest, exchangeCode, verifyIdToken, resetOidcC
 import { githubAuthorizeUrl, exchangeGithubCode, fetchGithubUser, randomToken } from "./portal/github-oauth";
 import { SESSION_COOKIE, CSRF_COOKIE, makeSessionCookie, readSessionCookie, makeStateCookie, readStateCookie, newCsrfToken } from "./portal/session";
 import { readAttributionToken, optionKey } from "./portal/attribution";
-import { readCompletionToken, parseAgreeCommand, parseThirdPartyCommand } from "./portal/completion";
+import { readCompletionToken, parseAgreeCommand, parseThirdPartyCommand, parseMetaCommand } from "./portal/completion";
 import { signEnrollmentToken, readEnrollmentToken } from "./portal/enroll";
 import { normalizeCommitEmail, emailChallengeHash, EMAIL_CHALLENGE_TTL_MS } from "./portal/emails";
 import { loadSnapshot, oclaForSlug } from "./store/load";
@@ -25,7 +25,7 @@ import { sha256Hex } from "./portal/oidc";
 import { sendMail, mailDeps } from "./notify/mail";
 import { fetchPrHeadSha } from "./github/pulls";
 import { appendRecord } from "./store/write";
-import { readCookie, sessionOf, csrfOk, signerView, editionText, portalApi } from "./portal/helpers";
+import { readCookie, sessionOf, csrfOk, signerView, editionText, portalApi, iclaRecordId } from "./portal/helpers";
 import { TOKEN_CACHE, ETAG_CACHE } from "./cache";
 
 /**
@@ -453,6 +453,7 @@ export function createApp(env: Env, overrides?: { fetcher?: FetchLike; now?: () 
         { api, installationId: GENERATED_CONFIG.github.dataInstallationId, dataRepo: GENERATED_CONFIG.github.dataRepo, now },
         "icla",
         {
+          id: await iclaRecordId(session.login, iclaEdition.sha256, now()),
           ribose_id_sub: session.sub,
           github_login: session.login,
           github_id: session.githubId,

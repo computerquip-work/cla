@@ -1,5 +1,6 @@
 import { parse as parseYaml } from "yaml";
 import { createHash } from "node:crypto";
+import { isSpdxId } from "./spdx";
 
 /**
  * The instance config: parsed, validated, FAIL-CLOSED at gen time
@@ -19,6 +20,11 @@ export type AppConfig = {
   legal: {
     editions: { icla: EditionFile[]; ocla: EditionFile[] };
     current: { icla: string; ocla: string }; // version strings
+    /** Counsel-owned accepted-license list for clause-7 third-party
+     *  declarations (issue #118). `undefined` is UNCONFIGURED; an empty
+     *  list is an explicit "nothing is accepted". Both refuse: a
+     *  third-party declaration never rides in unchecked. */
+    thirdParty?: { acceptedLicenses: string[] };
   };
   github: {
     appSlug: string;
@@ -148,6 +154,40 @@ export async function parseConfig(yamlText: string, readLegal: LegalReader): Pro
   const iclaEd = await parseEditions(editionsRaw["icla"], "icla", readLegal, errors);
   const oclaEd = await parseEditions(editionsRaw["ocla"], "ocla", readLegal, errors);
 
+  // The clause-7 accepted-license list (issue #118). Absent and empty are
+  // deliberately different: absent = unconfigured (refuse), empty = an
+  // explicit counsel posture that nothing is accepted. Duplicates are
+  // folded case-insensitively, preserving the configured spelling.
+  let thirdParty: { acceptedLicenses: string[] } | undefined;
+  const thirdPartyRaw = legalRaw["third_party"];
+  if (thirdPartyRaw !== undefined && thirdPartyRaw !== null) {
+    const list = obj(thirdPartyRaw)["accepted_licenses"];
+    if (!Array.isArray(list)) {
+      errors.push({ path: "legal.third_party.accepted_licenses", message: "must be a list (an empty list accepts nothing)" });
+    } else {
+      const ids: string[] = [];
+      for (const entry of list) {
+        const id = str(entry);
+        if (!id) {
+          errors.push({ path: "legal.third_party.accepted_licenses", message: "entries must be non-empty strings" });
+        } else if (!isSpdxId(id)) {
+          errors.push({ path: "legal.third_party.accepted_licenses", message: `"${id}" is not a single SPDX identifier` });
+        } else {
+          ids.push(id);
+        }
+      }
+      const seen = new Set<string>();
+      thirdParty = {
+        acceptedLicenses: ids.filter((id) => {
+          const key = id.toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        }),
+      };
+    }
+  }
+
   const github = obj(r["github"]);
   const dataRepo = str(github["data_repo"]);
   const offlineRepo = str(github["offline_repo"]);
@@ -200,7 +240,7 @@ export async function parseConfig(yamlText: string, readLegal: LegalReader): Pro
       },
       ...(roster ? { roster } : {}),
       identity: { issuer: issuer!, clientId: clientId! },
-      legal: { editions: { icla: iclaEd.files, ocla: oclaEd.files }, current: { icla: iclaEd.current!, ocla: oclaEd.current! } },
+      legal: { editions: { icla: iclaEd.files, ocla: oclaEd.files }, current: { icla: iclaEd.current!, ocla: oclaEd.current! }, ...(thirdParty ? { thirdParty } : {}) },
       github: { appSlug: appSlug!, dataRepo: dataRepo!, offlineRepo: offlineRepo!, dataInstallationId: dataInstallationId! },
       coverage: {
         allowlist: { global: lowerAll(allowRaw["global"]), perOrg },

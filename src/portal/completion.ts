@@ -1,4 +1,5 @@
 import { b64UrlEncode } from "./oidc";
+import { isSpdxId } from "../spdx";
 
 /**
  * Signed completion-link tokens for the comment-command flow
@@ -79,12 +80,66 @@ export function parseAgreeCommand(body: string): AgreeCommand | undefined {
   return undefined;
 }
 
-/** The clause-7 declaration command (issue #63): the whole comment,
- *  case-insensitive — `@ribose-cla third-party: <name>`. */
-export const THIRD_PARTY_COMMAND = /^@ribose-cla third-party:\s*(.+)$/i;
-export function parseThirdPartyCommand(body: string): string | undefined {
+/** The clause-7 declaration command (issues #63, #118): the whole
+ *  comment, case-insensitive —
+ *  `@ribose-cla third-party: <name> (SPDX: <id>)`.
+ *  The SPDX id is MANDATORY: an optional one is a gate a contributor can
+ *  step around by omitting it, which is exactly what #118 prevents. One
+ *  identifier (or `LicenseRef-...`), not an expression; expressions need
+ *  list semantics counsel has not given. */
+const THIRD_PARTY_HEAD = /^@ribose-cla third-party:\s*/i;
+const THIRD_PARTY_SPDX = /\s*\(SPDX:\s*([^)]*)\)\s*$/i;
+
+export type ThirdPartyParse =
+  | { kind: "declaration"; name: string; spdx: string }
+  | { kind: "malformed"; reason: string };
+
+export function parseThirdPartyCommand(body: string): ThirdPartyParse | undefined {
   const t = body.trim();
-  const m = THIRD_PARTY_COMMAND.exec(t);
-  const name = m?.[1]?.trim();
-  return name ? name : undefined;
+  if (!THIRD_PARTY_HEAD.test(t)) return undefined;
+  const rest = t.replace(THIRD_PARTY_HEAD, "").trim();
+  if (!rest) return { kind: "malformed", reason: "a third-party name is required" };
+  const m = THIRD_PARTY_SPDX.exec(rest);
+  if (!m) return { kind: "malformed", reason: "an SPDX identifier is required" };
+  const spdx = (m[1] ?? "").trim();
+  const name = rest.slice(0, rest.length - m[0].length).trim();
+  if (!name) return { kind: "malformed", reason: "a third-party name is required" };
+  if (!spdx) return { kind: "malformed", reason: "an SPDX identifier is required" };
+  if (!isSpdxId(spdx)) return { kind: "malformed", reason: `"${spdx}" is not a single SPDX identifier` };
+  return { kind: "declaration", name, spdx };
+}
+
+export type ThirdPartyDecision =
+  | { allowed: true; spdx: string }
+  | { allowed: false; reason: string; message: string };
+
+/** The accepted-license gate (issue #118). `undefined` is UNCONFIGURED and
+ *  `[]` is an explicit "nothing accepted": both refuse, in different words,
+ *  because a declaration that passes without a list is the silent pass the
+ *  issue exists to prevent. Matching is case-insensitive; the configured
+ *  spelling is returned so records and markings stay canonical. */
+export function thirdPartyGate(accepted: string[] | undefined, spdx: string): ThirdPartyDecision {
+  if (accepted === undefined) {
+    return {
+      allowed: false,
+      reason: "accepted-license list unconfigured",
+      message: "Third-party declarations are not available: Ribose has not configured its counsel-owned accepted-license list, so no third-party material can be accepted. A maintainer must set legal.third_party.accepted_licenses.",
+    };
+  }
+  if (accepted.length === 0) {
+    return {
+      allowed: false,
+      reason: "no third-party material accepted",
+      message: "Ribose does not currently accept third-party material in contributions, so this declaration is refused.",
+    };
+  }
+  const hit = accepted.find((a) => a.toLowerCase() === spdx.toLowerCase());
+  if (!hit) {
+    return {
+      allowed: false,
+      reason: `SPDX ${spdx} not accepted`,
+      message: `**${spdx}** is not on Ribose's accepted-license list, so this third-party declaration is refused. Accepted licenses: ${accepted.join(", ")}.`,
+    };
+  }
+  return { allowed: true, spdx: hit };
 }

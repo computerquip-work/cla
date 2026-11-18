@@ -126,8 +126,11 @@ export async function loadSnapshot(deps: StoreDeps, editions: Editions): Promise
       const pr = typeof o["pr"] === "number" ? o["pr"] : undefined;
       const login = typeof o["login"] === "string" ? o["login"] : undefined;
       const name = typeof o["name"] === "string" ? o["name"] : undefined;
+      // A pre-#118 declaration has no SPDX id; it stays valid and reads
+      // as "license not recorded" rather than being rejected.
+      const spdx = typeof o["spdx"] === "string" && o["spdx"].trim() ? o["spdx"].trim() : undefined;
       repo && pr !== undefined && login && name
-        ? thirdParties.push({ repo, pr, login, name })
+        ? thirdParties.push({ repo, pr, login, name, ...(spdx ? { spdx } : {}) })
         : rejected.push({ path, reason: "invalid third-party declaration" });
     }
     // role/ and link/ are portal inputs; email/ is folded into the snapshot.

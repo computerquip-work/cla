@@ -135,6 +135,31 @@ describe("data-repo round trip", () => {
     ]);
   });
 
+  it("third-party declarations round-trip with their SPDX id; a pre-#118 record stays valid", async () => {
+    const deps = { api: api(), installationId: 1, dataRepo: "example-org/cla-data", now: () => Date.now() };
+    await appendRecord(deps, "third_party", {
+      repo: "rnpgp/rnp",
+      pr: 1,
+      login: "tj-91",
+      name: "Old Corp",
+      recorded_at: "2026-11-12T00:00:00Z",
+    });
+    await appendRecord(deps, "third_party", {
+      repo: "rnpgp/rnp",
+      pr: 2,
+      login: "tj-91",
+      name: "New Corp",
+      spdx: "MIT",
+      recorded_at: "2026-11-18T00:00:00Z",
+    });
+
+    const { snapshot, rejected } = await loadSnapshot(lister(written()), EDITIONS);
+    expect(rejected).toEqual([]);
+    const byName = (n: string) => snapshot.thirdParties?.find((t) => t.name === n);
+    expect(byName("Old Corp")).toEqual({ repo: "rnpgp/rnp", pr: 1, login: "tj-91", name: "Old Corp" });
+    expect(byName("New Corp")).toMatchObject({ name: "New Corp", spdx: "MIT" });
+  });
+
   it("the documented snake_case OCLA schema (design §8) still loads", async () => {
     const files = {
       "ocla/2026/03/mtg-ag.json": {

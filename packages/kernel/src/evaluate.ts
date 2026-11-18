@@ -66,8 +66,10 @@ export type StoreSnapshot = {
   /** Per-PR agreement elections: a stored choice resolves must-specify (docs/design.md §3.11). */
   attributions?: Array<{ repo: string; pr: number; login: string; agreement: AgreementRef }>;
   /** Clause-7 declarations: the work is submitted on behalf of a named
-   *  third party; the contributor's own ICLA still gates coverage. */
-  thirdParties?: Array<{ repo: string; pr: number; login: string; name: string }>;
+   *  third party; the contributor's own ICLA still gates coverage. The
+   *  SPDX id is the license gate's record (issue #118); declarations
+   *  recorded before the gate existed carry none. */
+  thirdParties?: Array<{ repo: string; pr: number; login: string; name: string; spdx?: string }>;
   /** Logins whose contributions fall under a separate written agreement
    *  with Ribose (the registry lives in the private data repo; the
    *  classification stays there and is never rendered publicly). The

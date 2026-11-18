@@ -11,7 +11,7 @@ import { appendRecord } from "../store/write";
 import { randomToken } from "../portal/github-oauth";
 import { checkRunBody, createCheckRun, commentBody, conclusionFor, upsertComment, retractCoverageComment, postClosingComment, closingComment, preRegisterCheck, staleDeploymentBody, CHECK_NAME } from "./checks";
 import { signAttributionToken, optionKey } from "../portal/attribution";
-import { signCompletionToken, parseAgreeCommand, parseThirdPartyCommand, type AgreeCommand } from "../portal/completion";
+import { signCompletionToken, parseAgreeCommand, parseThirdPartyCommand, thirdPartyGate, type AgreeCommand } from "../portal/completion";
 
 /**
  * The pull_request orchestration (docs/design.md §5). Every store or
@@ -155,9 +155,9 @@ export async function closeMergedPullRequest(
   // gap (someone merged without coverage, or an unresolved election).
   const hasElections = Object.keys(elected).length > 0;
   const hasGaps = verdict.missing.length > 0 || Object.keys(verdict.mustSpecify).length > 0 || verdict.minimalChange === true;
-  const onBehalf = (loaded.snapshot.thirdParties ?? []).find((t) => t.pr === args.prNumber && t.repo.toLowerCase() === full.toLowerCase())?.name;
+  const onBehalf = (loaded.snapshot.thirdParties ?? []).find((t) => t.pr === args.prNumber && t.repo.toLowerCase() === full.toLowerCase());
   if (!hasElections && !hasGaps && !onBehalf) return { posted: false };
-  await postClosingComment(deps.api, args.installationId, full, args.prNumber, closingComment(verdict, elected, onBehalf, deps.config.instance.separateAgreement?.logins));
+  await postClosingComment(deps.api, args.installationId, full, args.prNumber, closingComment(verdict, elected, onBehalf ? { name: onBehalf.name, ...(onBehalf.spdx ? { spdx: onBehalf.spdx } : {}) } : undefined, deps.config.instance.separateAgreement?.logins));
   return { posted: true };
 }
 
@@ -167,30 +167,52 @@ export async function closeMergedPullRequest(
  *  coverage by self-declaration: `icla` elects only when the kernel's
  *  live paths offer the ICLA, and `company` elects only against the
  *  org's effective Schedule A — otherwise it files a join request. */
-/** issue_comment.created - the clause-7 declaration (issue #63): the
- *  committer declares the work is submitted on behalf of a named third
- *  party. The declaration is recorded append-only, the PR body gains
- *  the conspicuous marking (appended only when absent), and the reply
- *  states the obligations. Coverage is unchanged: the committer's own
- *  ICLA still gates the check. */
+/** issue_comment.created - the clause-7 declaration (issues #63, #118):
+ *  the committer declares the work is submitted on behalf of a named third
+ *  party, under an SPDX license Ribose accepts. The declaration is
+ *  recorded append-only, the PR body gains the conspicuous marking
+ *  (appended only when absent), and the reply states the obligations.
+ *  Coverage is unchanged: the committer's own ICLA still gates the check.
+ *  The license gate is closed by default: an unconfigured list refuses
+ *  every declaration, and a license off the list is refused by name. */
 export async function handleThirdPartyCommand(
   deps: EnforcementDeps,
   args: { installationId: number; repoFullName: string; prNumber: number; commenter: string; prAuthor: string; body: string },
 ): Promise<{ replied: boolean; reason?: string }> {
   const full = args.repoFullName;
   const commenter = args.commenter.toLowerCase();
-  const name = parseThirdPartyCommand(args.body);
-  if (!name) return { replied: false, reason: "not a command (ignored)" };
+  const parsed = parseThirdPartyCommand(args.body);
+  if (!parsed) return { replied: false, reason: "not a command (ignored)" };
 
   const { committers } = await fetchPrCommitters(deps.api, args.installationId, full, args.prNumber);
   const logins = new Set<string>(committers.flatMap((c) => (c.login ? [c.login.toLowerCase()] : [])));
   logins.add(args.prAuthor.toLowerCase());
   if (!logins.has(commenter)) return { replied: false, reason: "not a committer (ignored)" };
 
+  if (parsed.kind === "malformed") {
+    await postBotReply(
+      deps.api,
+      args.installationId,
+      full,
+      args.prNumber,
+      `@${commenter} that declaration is not usable: ${parsed.reason}. The clause-7 command is \`@ribose-cla third-party: <name> (SPDX: <identifier>)\` — for example \`@ribose-cla third-party: Example Corp (SPDX: MIT)\`. Nothing was recorded.`,
+    );
+    return { replied: true, reason: `malformed third-party declaration: ${parsed.reason}` };
+  }
+
+  const gate = thirdPartyGate(deps.config.legal.thirdParty?.acceptedLicenses, parsed.spdx);
+  if (!gate.allowed) {
+    await postBotReply(deps.api, args.installationId, full, args.prNumber, `@${commenter} ${gate.message}`);
+    return { replied: true, reason: gate.reason };
+  }
+  // The gate returns the CONFIGURED spelling: `mit` is recorded as `MIT`,
+  // so records and renderings never vary by contributor typing.
+  const spdx = gate.spdx;
+
   await appendRecord(
     { api: deps.api, installationId: deps.config.github.dataInstallationId, dataRepo: deps.config.github.dataRepo, now: () => Date.now() },
     "third_party",
-    { id: randomToken(), repo: full, pr: args.prNumber, login: commenter, name, recorded_at: new Date().toISOString() },
+    { id: randomToken(), repo: full, pr: args.prNumber, login: commenter, name: parsed.name, spdx, recorded_at: new Date().toISOString() },
   );
 
   // The conspicuous marking lives in the PR body (clause 7): append the
@@ -198,7 +220,7 @@ export async function handleThirdPartyCommand(
   const prRes = await deps.api.request(args.installationId, "GET", `/repos/${full}/pulls/${args.prNumber}`);
   if (prRes.status !== 200) throw new Error(`pull lookup failed: ${prRes.status}`);
   const prBody = (JSON.parse(prRes.body) as { body?: string }).body ?? "";
-  const MARKING = `Submitted on behalf of a third-party: ${name}`;
+  const MARKING = `Submitted on behalf of a third-party: ${parsed.name} (SPDX: ${spdx})`;
   if (!prBody.includes("Submitted on behalf of a third-party:")) {
     const patched = await deps.api.request(args.installationId, "PATCH", `/repos/${full}/pulls/${args.prNumber}`, {
       body: { body: `${prBody}${prBody ? "\n\n" : ""}${MARKING}` },
@@ -215,7 +237,7 @@ export async function handleThirdPartyCommand(
     [
       `@${commenter} recorded: this pull request declares **${MARKING}**. The marking is in the pull request description, as the Agreement's third-party clause requires.`,
       ``,
-      `The obligations in plain sentences: the work must not be your original creation, the source and its license must be identified in the pull request, and the marking must stay conspicuous. This declaration does not replace your own agreement - your signed Individual CLA still gates this pull request.`,
+      `The obligations in plain sentences: the work must not be your original creation, the source and its license (${spdx}) must be identified in the pull request, and the marking must stay conspicuous. This declaration does not replace your own agreement - your signed Individual CLA still gates this pull request.`,
       ``,
       `No Individual CLA on record? [Sign it here](${portalBase}/icla) - the declaration carries the attribution; the signature carries the coverage.`,
     ].join("\n"),

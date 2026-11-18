@@ -55,6 +55,15 @@ legal:
       current: "1.0"
       files:
         "1.0": legal/ocla/1.0.md
+  # Clause-7 third-party declarations (issue #118): the SPDX ids Ribose
+  # accepts. Counsel-owned instance data — the list below is ILLUSTRATIVE
+  # for the example instance only. ABSENT = third-party declarations are
+  # refused (fail-closed); an explicit empty list = none are accepted.
+  third_party:
+    accepted_licenses:
+      - BSD-2-Clause
+      - BSD-3-Clause
+      - MIT
 
 github:
   app_slug: example-cla

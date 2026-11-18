@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { createApp } from "../src/app";
-import { signCompletionToken, readCompletionToken, isAgreeCommand } from "../src/portal/completion";
+import { signCompletionToken, readCompletionToken, isAgreeCommand, thirdPartyGate } from "../src/portal/completion";
 import { makeSessionCookie, SESSION_COOKIE } from "../src/portal/session";
 import { makeFixture, makeKeyPem, WEBHOOK_SECRET, hmacHex, type Fixture } from "./helpers";
 
@@ -208,13 +208,13 @@ describe("issue_comment: @ribose-cla agree grammar (issue #57)", () => {
   });
 });
 
-// ---- issue #63: @ribose-cla third-party: <name> ----
+// ---- issues #63 / #118: @ribose-cla third-party: <name> (SPDX: <id>) ----
 
-describe("issue_comment: third-party declaration (issue #63)", () => {
-  const thirdPartyPayload = (commenter: string, name: string, isPr = true) =>
-    commentPayload(commenter, `@ribose-cla third-party: ${name}`, isPr);
+describe("issue_comment: third-party declaration (issues #63, #118)", () => {
+  const thirdPartyPayload = (commenter: string, name: string, spdx = "MIT") =>
+    commentPayload(commenter, `@ribose-cla third-party: ${name} (SPDX: ${spdx})`);
 
-  it("a committer's declaration records append-only and replies with the obligations", async () => {
+  it("a committer's declaration records append-only, with its SPDX id, and replies with the obligations", async () => {
     const res = await deliverComment(thirdPartyPayload("tj-91", "Example Corp"));
     expect(res.status).toBe(200);
     const out = (await res.json()) as Record<string, unknown>;
@@ -224,25 +224,56 @@ describe("issue_comment: third-party declaration (issue #63)", () => {
     const put = fx.calls.find((c) => c.method === "PUT" && c.url.includes("/contents/third_party/"));
     expect(put).toBeDefined();
     const record = JSON.parse(Buffer.from((put!.body as Record<string, unknown>)["content"] as string, "base64").toString()) as Record<string, unknown>;
-    expect(record).toMatchObject({ repo: "rnpgp/rnp", pr: 1, login: "tj-91", name: "Example Corp" });
+    expect(record).toMatchObject({ repo: "rnpgp/rnp", pr: 1, login: "tj-91", name: "Example Corp", spdx: "MIT" });
 
     const reply = fx.calls.filter((c) => c.method === "POST" && c.url.endsWith("/issues/1/comments")).at(-1);
     const text = (reply!.body as Record<string, unknown>)["body"] as string;
-    expect(text).toContain("Submitted on behalf of a third-party: Example Corp");
+    expect(text).toContain("Submitted on behalf of a third-party: Example Corp (SPDX: MIT)");
+    expect(text).toContain("license (MIT)");
     expect(text).toContain("does not replace your own agreement");
 
     // the conspicuous marking lands in the PR body (clause 7)
     const patch = fx.calls.find((c) => c.method === "PATCH" && c.url.endsWith("/pulls/1"));
     expect(patch).toBeDefined();
-    expect(((patch!.body as Record<string, unknown>)["body"] as string)).toContain("Submitted on behalf of a third-party: Example Corp");
+    expect(((patch!.body as Record<string, unknown>)["body"] as string)).toContain("Submitted on behalf of a third-party: Example Corp (SPDX: MIT)");
   });
 
   it("a body that already carries the marking is left alone", async () => {
     fx.routes.set("/repos/rnpgp/rnp/pulls/1", () =>
-      Response.json({ head: { sha: "abc123" }, body: "work summary\\n\\nSubmitted on behalf of a third-party: Example Corp" }, { status: 200 }),
+      Response.json({ head: { sha: "abc123" }, body: "work summary\\n\\nSubmitted on behalf of a third-party: Example Corp (SPDX: MIT)" }, { status: 200 }),
     );
     await deliverComment(thirdPartyPayload("tj-91", "Example Corp"));
     expect(fx.calls.some((c) => c.method === "PATCH" && c.url.endsWith("/pulls/1"))).toBe(false);
+  });
+
+  it("a license off the accepted list is refused by name, and nothing is recorded", async () => {
+    const res = await deliverComment(thirdPartyPayload("tj-91", "Example Corp", "BUSL-1.1"));
+    const out = (await res.json()) as Record<string, unknown>;
+    expect(out["replied"]).toBe(true);
+    expect(out["reason"]).toBe("SPDX BUSL-1.1 not accepted");
+    expect(fx.calls.some((c) => c.method === "PUT" && c.url.includes("/contents/third_party/"))).toBe(false);
+    const reply = fx.calls.filter((c) => c.method === "POST" && c.url.endsWith("/issues/1/comments")).at(-1);
+    const text = (reply!.body as Record<string, unknown>)["body"] as string;
+    expect(text).toContain("not on Ribose's accepted-license list");
+    expect(text).toContain("Accepted licenses: BSD-2-Clause, BSD-3-Clause, MIT");
+  });
+
+  it("a declaration without an SPDX id is refused with the grammar, and nothing is recorded", async () => {
+    const res = await deliverComment(commentPayload("tj-91", "@ribose-cla third-party: Example Corp"));
+    const out = (await res.json()) as Record<string, unknown>;
+    expect(out["replied"]).toBe(true);
+    expect(String(out["reason"])).toContain("malformed third-party declaration");
+    expect(fx.calls.some((c) => c.method === "PUT" && c.url.includes("/contents/third_party/"))).toBe(false);
+    const reply = fx.calls.filter((c) => c.method === "POST" && c.url.endsWith("/issues/1/comments")).at(-1);
+    expect((reply!.body as Record<string, unknown>)["body"] as string).toContain("(SPDX: <identifier>)");
+  });
+
+  it("an SPDX expression is refused: the accepted list is a list of identifiers", async () => {
+    const res = await deliverComment(thirdPartyPayload("tj-91", "Example Corp", "MIT OR Apache-2.0"));
+    const out = (await res.json()) as Record<string, unknown>;
+    expect(String(out["reason"])).toContain("malformed third-party declaration");
+    const reply = fx.calls.filter((c) => c.method === "POST" && c.url.endsWith("/issues/1/comments")).at(-1);
+    expect((reply!.body as Record<string, unknown>)["body"] as string).toContain("is not a single SPDX identifier");
   });
 
   it("non-committers are ignored; a declaration never grants coverage (the check still fails without a signature)", async () => {
@@ -250,5 +281,22 @@ describe("issue_comment: third-party declaration (issue #63)", () => {
     const out = (await res.json()) as Record<string, unknown>;
     expect(out["replied"]).toBe(false);
     expect(fx.calls.some((c) => c.method === "PUT" && c.url.includes("/contents/third_party/"))).toBe(false);
+  });
+});
+
+describe("third-party accepted-license gate (issue #118)", () => {
+  it("an unconfigured list fails closed, in different words from an explicit empty list", () => {
+    const unset = thirdPartyGate(undefined, "MIT");
+    expect(unset).toMatchObject({ allowed: false, reason: "accepted-license list unconfigured" });
+    if (!unset.allowed) expect(unset.message).toContain("has not configured");
+    const empty = thirdPartyGate([], "MIT");
+    expect(empty).toMatchObject({ allowed: false, reason: "no third-party material accepted" });
+    if (!empty.allowed) expect(empty.message).toContain("does not currently accept");
+  });
+
+  it("matches ids case-insensitively and returns the configured spelling", () => {
+    expect(thirdPartyGate(["MIT", "BSD-3-Clause"], "mit")).toEqual({ allowed: true, spdx: "MIT" });
+    const no = thirdPartyGate(["MIT"], "BUSL-1.1");
+    expect(no).toMatchObject({ allowed: false, reason: "SPDX BUSL-1.1 not accepted" });
   });
 });

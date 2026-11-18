@@ -84,6 +84,36 @@ describe("config: valid parse", () => {
   });
 });
 
+describe("config: the clause-7 accepted-license list (issue #118)", () => {
+  const withThirdParty = (block: string): string => VALID.replace("  editions:", `${block}  editions:`);
+
+  it("parses the list, folds duplicates case-insensitively, and keeps absent distinct from empty", async () => {
+    const listed = await parseConfig(withThirdParty("  third_party:\n    accepted_licenses: [ MIT, BSD-3-Clause, mit ]\n"), reader);
+    if ("errors" in listed) throw new Error(`unexpected errors: ${JSON.stringify(listed.errors)}`);
+    expect(listed.config.legal.thirdParty).toEqual({ acceptedLicenses: ["MIT", "BSD-3-Clause"] });
+
+    const absent = await parseConfig(VALID, reader);
+    if ("errors" in absent) throw new Error("unexpected errors");
+    expect(absent.config.legal.thirdParty).toBeUndefined();
+
+    const empty = await parseConfig(withThirdParty("  third_party:\n    accepted_licenses: []\n"), reader);
+    if ("errors" in empty) throw new Error(`unexpected errors: ${JSON.stringify(empty.errors)}`);
+    expect(empty.config.legal.thirdParty).toEqual({ acceptedLicenses: [] });
+  });
+
+  it("an expression or a non-string entry is a gen-time error", async () => {
+    for (const bad of ['[ "MIT OR Apache-2.0" ]', "[ 3 ]"]) {
+      const r = await parseConfig(withThirdParty(`  third_party:\n    accepted_licenses: ${bad}\n`), reader);
+      expect("errors" in r && r.errors.some((e) => e.path === "legal.third_party.accepted_licenses")).toBe(true);
+    }
+  });
+
+  it("a third_party block without accepted_licenses is an error, not an implicit empty list", async () => {
+    const r = await parseConfig(withThirdParty("  third_party: {}\n"), reader);
+    expect("errors" in r && r.errors.some((e) => e.path === "legal.third_party.accepted_licenses")).toBe(true);
+  });
+});
+
 describe("config: fails closed at gen time", () => {
   it("current version not in files map is an error", async () => {
     const bad = VALID.replace('icla: { current: "1.0"', 'icla: { current: "2.0"');

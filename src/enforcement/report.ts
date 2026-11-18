@@ -11,12 +11,18 @@ import { makeListRecords } from "../store/github-store";
  * signed / stale / outstanding / must-specify / allowlist / CI account,
  * with the separate-agreement registry flagged. One bounded step at a
  * time, cursor-persisting like the installation backfill, because an
- * estate is thousands of repositories and each costs a commits call.
+ * estate is thousands of repositories and each costs a commits call and
+ * a license call.
  *
  * The App cannot read branch protection (it holds no administration
  * permission — constraint 7), so "required check armed" is NOT part of
  * this report: that answer lives in #53 and in the repository settings.
  * The report says so in `notes` rather than guessing.
+ *
+ * The license column (issue #116) is Licensee detection, an observation
+ * and never a legal opinion: it makes "which repos have which needs" a
+ * standing view while the scope-bound edition mechanism waits on counsel.
+ * A BUSL repository is visible here; nothing here judges it.
  */
 
 const PER_PAGE = 100;
@@ -48,8 +54,32 @@ export type ContributorRow = {
 export type RepoCoverageRow = {
   repo: string;
   in_scope: boolean;
+  /** Which agreement instrument this repository's pull requests require
+   *  (the scope binding). `standard` is the deployed ICLA/OCLA pair;
+   *  `excluded` is coverage.repos_without_cla. A scope-bound edition for
+   *  a restrictive license is riboseinc/cla#116 and will name itself
+   *  here once counsel decides. */
+  scope: RepoScope;
+  /** GitHub Licensee's detection for the repository. */
+  license: RepoLicense;
   note?: string;
   contributors: ContributorRow[];
+};
+
+export type RepoScope = "standard" | "excluded";
+
+/** What the repo's LICENSE file actually says. The three states are kept
+ *  apart because collapsing them would read an unanswered lookup as "no
+ *  license", and an all-rights-reserved repo as ordinary. */
+export type RepoLicense = {
+  /** SPDX identifier Licensee detected (e.g. "BUSL-1.1"), or null when
+   *  there is no license file Licensee can identify. */
+  spdx: string | null;
+  /** declared: Licensee identified a license; none: no license file
+   *  (all rights reserved); unreadable: the App could not ask. */
+  state: "declared" | "none" | "unreadable";
+  /** Present only on `unreadable`: why the inventory does not know. */
+  note?: string;
 };
 
 export type RepoCoverageReport = {
@@ -112,6 +142,26 @@ function sampleCommitters(commits: Array<Record<string, unknown>>, window: numbe
 
 const keyOf = (c: Committer): string => c.login ?? `email:${c.email ?? ""}`;
 
+/** GitHub Licensee's answer for one repository. A 404 is the documented
+ *  "no license file" answer, and is a fact about the repo; every other
+ *  non-200 is the App's failure to ask, and must not be reported as a
+ *  repo with no license. */
+export function licenseFromResponse(status: number, body: string): RepoLicense {
+  if (status === 404) return { spdx: null, state: "none" };
+  if (status !== 200) return { spdx: null, state: "unreadable", note: `license lookup failed: ${status}` };
+  let doc: { license?: { spdx_id?: unknown } | null };
+  try {
+    doc = JSON.parse(body) as typeof doc;
+  } catch {
+    return { spdx: null, state: "unreadable", note: "license response unparseable" };
+  }
+  const spdx = typeof doc.license?.spdx_id === "string" ? doc.license.spdx_id.trim() : "";
+  if (!spdx) return { spdx: null, state: "unreadable", note: "Licensee returned no SPDX identifier" };
+  // "NOASSERTION" is a real SPDX value: a license file exists that
+  // Licensee cannot map. Keep it verbatim — it is not "no license".
+  return { spdx, state: "declared" };
+}
+
 /** The per-repo table: kernel precedence decides coverage, this maps it
  *  to the operator's state words (matching the roster's vocabulary). */
 export function repoRow(
@@ -122,6 +172,7 @@ export function repoRow(
   cfg: Config,
   editions: Editions,
   window: number,
+  license: RepoLicense,
 ): RepoCoverageRow {
   const { committers, lastCommit } = sampleCommitters(commits, window);
   const org = repo.split("/")[0] ?? "";
@@ -167,7 +218,7 @@ export function repoRow(
       rows.push({ ...base, state: historical.icla || historical.ocla ? "stale" : "outstanding" });
     }
   }
-  return { repo, in_scope: inScope, contributors: rows };
+  return { repo, in_scope: inScope, scope: inScope ? "standard" : "excluded", license, contributors: rows };
 }
 
 export async function repoCoverageStep(
@@ -195,11 +246,16 @@ export async function repoCoverageStep(
 
   const repos: RepoCoverageRow[] = [];
   for (const repo of slice) {
+    // The inventory fact is about the repo, not about its people: fetch it
+    // even for excluded repos, where the operator still asks what the
+    // estate contains (issue #116).
+    const licRes = await deps.api.request(installationId, "GET", `/repos/${repo}/license`);
+    const license = licenseFromResponse(licRes.status, licRes.body);
     const inScope = !deps.config.coverage.reposWithoutCla.includes(repo.toLowerCase());
     if (!inScope) {
       // Excluded by config: enforcement does not apply, so the people are
       // not relevant to the operator's question — the posture is.
-      repos.push({ repo, in_scope: false, contributors: [] });
+      repos.push({ repo, in_scope: false, scope: "excluded", license, contributors: [] });
       continue;
     }
     const res = await deps.api.request(installationId, "GET", `/repos/${repo}/commits?per_page=${window}`);
@@ -207,12 +263,14 @@ export async function repoCoverageStep(
       repos.push({
         repo,
         in_scope: true,
+        scope: "standard",
+        license,
         note: res.status === 409 ? "empty repository (no commits)" : `commit listing failed: ${res.status}`,
         contributors: [],
       });
       continue;
     }
-    repos.push(repoRow(repo, true, JSON.parse(res.body), snapshot, deps.config, editions, window));
+    repos.push(repoRow(repo, true, JSON.parse(res.body), snapshot, deps.config, editions, window, license));
   }
 
   const consumed = cursor.offset + slice.length;
@@ -249,6 +307,10 @@ export async function repoCoverageStep(
           ]
         : []),
       "required-check status is not readable by the App (it holds no administration permission) — tracked per repo in riboseinc/cla#53",
+      // The license inventory (issue #116): an observation, and the three
+      // states stay distinct so an unanswered lookup never reads as "no
+      // license file". Scope-bound editions await counsel.
+      "license is GitHub Licensee's per-repository detection (state `none` = no license file Licensee can identify, i.e. all rights reserved; `unreadable` = the App could not ask); the scope column says which instrument set a repo's PRs require (`standard` = the deployed ICLA/OCLA pair, `excluded` = coverage.repos_without_cla) — scope-bound editions are riboseinc/cla#116, pending counsel",
       "excluded repositories (coverage.repos_without_cla) are reported with in_scope=false and no contributors",
     ],
   };

@@ -128,7 +128,7 @@ export function commentBody(
       const links = (opts.attributionLinks?.[c.login ?? ""] ?? c.options.map((o) => ({ label: o.kind === "icla" ? `Individual CLA v${o.version}` : `${o.orgSlug} OCLA v${o.version}`, url: `${portalBase}/agreements` })))
         .map((l) => `[${l.label}](${l.url})`)
         .join(" · ");
-      rows.push(`| ${who(c)} | This pull request is covered by more than one agreement. Choose the one that applies: ${links}. |`);
+      rows.push(`| ${who(c)} | This pull request is covered by more than one agreement. Choose the one that applies: ${links} — or reply \`@ribose-cla agree icla\` (or \`@ribose-cla agree company=<org>\`) right here. |`);
     } else if (c.login === null && c.email) {
       rows.push(`| ${who(c)} | Your commit's author email is not linked to any GitHub account. Configure git to commit with an email verified under your GitHub account (Settings → Emails), then push again. Already covered under another account? Verify this address once as a [commit email](${portalBase}/agreements) — no re-signing. If Ribose also requires a signed agreement from you: [sign the Individual CLA](${portalBase}/icla)${opts.signingDocsUrl ? ` ([how to sign](${opts.signingDocsUrl}))` : ""}. |`);
     } else {
@@ -139,7 +139,7 @@ export function commentBody(
         : supersededOrg
           ? `You are on the Schedule A of ${supersededOrg.orgSlug}'s Organization CLA v${supersededOrg.signed}, which the current edition v${supersededOrg.current} supersedes; the organization's signatory must re-execute it`
           : "Ribose requires a signed agreement for every contribution";
-      rows.push(`| ${who(c)} | ${what}. [Sign the Individual CLA](${portalBase}/icla)${opts.signingDocsUrl ? ` ([how to sign](${opts.signingDocsUrl}))` : ""} or [find your organization](${portalBase}/organizations). |`);
+      rows.push(`| ${who(c)} | ${what}. [Sign the Individual CLA](${portalBase}/icla)${opts.signingDocsUrl ? ` ([how to sign](${opts.signingDocsUrl}))` : ""} or [find your organization](${portalBase}/organizations) — or reply \`@ribose-cla agree\` and follow the link the check posts. |`);
     }
   }
   const headline =
@@ -157,6 +157,8 @@ export function commentBody(
     ...rows,
     ...(opts.notices?.length ? ["", ...opts.notices] : []),
     ...(opts.signingDocsUrl ? ["", `New to this check? [How to sign the Ribose CLA](${opts.signingDocsUrl}) explains both flows; one signature covers every Ribose organization. Once the signature is recorded, this check turns green on its own, and no re-push is needed.`] : []),
+    "",
+    `Reply \`@ribose-cla help\` in this pull request to see everything this check supports — [the full guide lives here](${portalBase}/help).`,
   ].join("\n");
 }
 

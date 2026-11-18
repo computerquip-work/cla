@@ -11,7 +11,7 @@ import { appendRecord } from "../store/write";
 import { randomToken } from "../portal/github-oauth";
 import { checkRunBody, createCheckRun, commentBody, conclusionFor, upsertComment, retractCoverageComment, postClosingComment, closingComment, preRegisterCheck, staleDeploymentBody, CHECK_NAME } from "./checks";
 import { signAttributionToken, optionKey } from "../portal/attribution";
-import { signCompletionToken, parseAgreeCommand, parseThirdPartyCommand, thirdPartyGate, type AgreeCommand } from "../portal/completion";
+import { signCompletionToken, parseAgreeCommand, parseThirdPartyCommand, parseMetaCommand, thirdPartyGate, type AgreeCommand } from "../portal/completion";
 
 /**
  * The pull_request orchestration (docs/design.md §5). Every store or
@@ -378,6 +378,80 @@ export async function handleAgreeCommand(
     return { replied: true, reason: "ocla not among live options" };
   }
   return elect(oclaOption, `the ${ocla.orgSlug} OCLA v${oclaOption.version}`);
+}
+
+/** issue_comment.created — the meta grammar (2026-11-18): `help`
+ *  teaches the grammar, `status` answers for the CALLER only, and
+ *  `recheck` re-runs the evaluation on the current head (the manual
+ *  fallback after signing elsewhere). Participant-scoped like every
+ *  command: the bot answers the PR's own people, never strangers. */
+export async function handleMetaCommand(
+  deps: EnforcementDeps,
+  args: { installationId: number; repoFullName: string; prNumber: number; commenter: string; prAuthor: string; body: string },
+): Promise<{ replied: boolean; reason?: string }> {
+  const full = args.repoFullName;
+  const commenter = args.commenter.toLowerCase();
+  const command = parseMetaCommand(args.body);
+  if (!command) return { replied: false, reason: "not a command (ignored)" };
+
+  const { committers } = await fetchPrCommitters(deps.api, args.installationId, full, args.prNumber);
+  const logins = new Set<string>(committers.flatMap((c) => (c.login ? [c.login.toLowerCase()] : [])));
+  logins.add(args.prAuthor.toLowerCase());
+  if (!logins.has(commenter)) return { replied: false, reason: "not a committer (ignored)" };
+
+  const portalBase = `https://${deps.config.instance.portalHost}`;
+  if (command === "help") {
+    await postBotReply(
+      deps.api,
+      args.installationId,
+      full,
+      args.prNumber,
+      [
+        `@${commenter} — everything this check supports:`,
+        ``,
+        `- \`@ribose-cla agree\` — sign the Individual CLA from here; the check posts your personal sign link.`,
+        `- \`@ribose-cla agree icla\` — elect the Individual CLA when the check asks you to choose an agreement.`,
+        `- \`@ribose-cla agree company=<org>\` — elect your organization's CLA when you are on its roster, or file a join request when you are not.`,
+        `- \`@ribose-cla third-party: <name> (SPDX: <license>)\` — declare work submitted on behalf of a third party (clause 7).`,
+        `- \`@ribose-cla status\` — your own coverage, answered live.`,
+        `- \`@ribose-cla recheck\` — re-run the check on the current head.`,
+        ``,
+        `One signature covers every Ribose organization. Full guide: [How to sign the Ribose CLA](${deps.config.instance.signingDocsUrl ?? `${portalBase}/help`}) · [all commands and flows](${portalBase}/help).`,
+      ].join("\n"),
+    );
+    return { replied: true, reason: "help posted" };
+  }
+
+  if (command === "status") {
+    const editions = kernelEditions(deps.config);
+    const { snapshot } = await loadSnapshot(
+      { listRecords: makeListRecords(deps.api, deps.config.github.dataInstallationId, deps.config.github.dataRepo) },
+      editions,
+    );
+    const mine = snapshot.iclas.find((r) => r.githubLogin.toLowerCase() === commenter && r.edition.textSha256 === editions.icla.textSha256);
+    if (mine) {
+      await postBotReply(deps.api, args.installationId, full, args.prNumber, `@${commenter} — you are covered: **Individual CLA v${mine.edition.version}**, live now. One signature covers every Ribose organization.`);
+      return { replied: true, reason: "status: icla" };
+    }
+    const roster = snapshot.oclas.find((o) => o.edition.textSha256 === editions.ocla.textSha256 && o.covered.some((r) => r.githubLogin.toLowerCase() === commenter));
+    if (roster) {
+      await postBotReply(deps.api, args.installationId, full, args.prNumber, `@${commenter} — you are covered through the **${roster.orgSlug} Organization CLA** (Schedule A).`);
+      return { replied: true, reason: "status: ocla" };
+    }
+    const registry = (deps.config.instance.separateAgreement?.logins ?? []).some((l) => l.toLowerCase() === commenter);
+    if (registry) {
+      await postBotReply(deps.api, args.installationId, full, args.prNumber, `@${commenter} — this work is submitted under an existing Ribose agreement; the CLA process does not apply to you.`);
+      return { replied: true, reason: "status: registry" };
+    }
+    await postBotReply(deps.api, args.installationId, full, args.prNumber, `@${commenter} — no live agreement is on record for you. Reply \`@ribose-cla agree\` and follow the link the check posts, or [sign in the portal](${portalBase}/icla).`);
+    return { replied: true, reason: "status: none" };
+  }
+
+  // recheck: re-render the public state on the current head.
+  const sha = await fetchPrHeadSha(deps.api, args.installationId, full, args.prNumber);
+  const r = await evaluatePullRequest(deps, { installationId: args.installationId, repoFullName: full, prNumber: args.prNumber, headSha: sha });
+  await postBotReply(deps.api, args.installationId, full, args.prNumber, `@${commenter} — re-ran the check on the current head (${r.outcome}).`);
+  return { replied: true, reason: "recheck run" };
 }
 
 async function postBotReply(api: GithubApi, installationId: number, repoFullName: string, prNumber: number, body: string): Promise<void> {

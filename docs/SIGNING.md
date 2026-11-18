@@ -117,3 +117,24 @@ marking to the pull request description and states the obligations in its
 reply. The declaration does not replace your own agreement — your
 signature still gates the check.
 
+
+## Working from the pull request: the commands
+
+The check replies to a pull request's own contributors. Write any of
+these as a comment on your pull request:
+
+- `@ribose-cla help` — every command, listed in the thread.
+- `@ribose-cla agree` — sign from the pull request: the check posts
+  your personal sign link.
+- `@ribose-cla agree icla` — elect the Individual CLA when the check
+  asks you to choose an agreement.
+- `@ribose-cla agree company=<org>` — elect your organization's CLA
+  when you are on its roster; when you are not, it files a join request
+  with the organization's Point of Contact.
+- `@ribose-cla third-party: <name> (SPDX: <license>)` — declare work
+  submitted on behalf of a third party, under a license Ribose accepts
+  (the Agreement's third-party clause).
+- `@ribose-cla status` — your own coverage, answered live.
+- `@ribose-cla recheck` — re-run the check on the current head.
+
+The portal page at `/help` carries the same list.

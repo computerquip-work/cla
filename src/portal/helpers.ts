@@ -73,3 +73,17 @@ export async function signerView(env: Env, fetcher: FetchLike, now: () => number
 }
 
 export { editionText, GENERATED_CONFIG };
+
+/**
+ * The ICLA record id is DETERMINISTIC (login × edition × UTC day): a
+ * double-POST race in the sign flow lands both writes on the same path,
+ * so the record is overwritten, never duplicated (rnpgp/rnp#2573 — two
+ * records one second apart read as two coverage paths and held a signed
+ * contributor in a phantom must-specify).
+ */
+export async function iclaRecordId(login: string, editionSha: string, at: number): Promise<string> {
+  const d = new Date(at);
+  const day = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${login.toLowerCase()}|${editionSha}|${day}`));
+  return `icla-${[...new Uint8Array(digest)].slice(0, 16).map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+}

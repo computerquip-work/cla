@@ -1,0 +1,42 @@
+---
+import Base from "../layouts/Base.astro";
+---
+
+<Base title="What the Ribose CLA supports — Ribose CLA">
+  <div class="mx-auto max-w-3xl">
+    <h1 class="font-serif text-2xl font-semibold">What the Ribose CLA supports</h1>
+    <p class="mt-2 max-w-prose text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+      Every way a contributor works with the check named <code class="font-mono text-[0.9em]">cla/ribose</code>: the portal flows, and the commands a contributor can write as a pull-request comment. One signature covers your contributions to every Ribose organization.
+    </p>
+
+    <h2 class="mt-8 font-serif text-lg font-semibold">The flows</h2>
+    <div class="mt-3 space-y-3 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+      <p><strong class="text-ink dark:text-white">Sign in the portal.</strong> <a class="underline decoration-rule hover:decoration-ink dark:hover:decoration-white" href="/icla">Sign the Individual CLA</a> — sign in with GitHub, type your full legal name, done. Organizations sign <a class="underline decoration-rule hover:decoration-ink dark:hover:decoration-white" href="/organizations">through their own agreement</a> with a Schedule A of covered members.</p>
+      <p><strong class="text-ink dark:text-white">Covered without signing.</strong> Staff and contractors are covered by an existing Ribose agreement; the CLA process does not apply, and the check never asks them to sign.</p>
+      <p><strong class="text-ink dark:text-white">Choosing an agreement.</strong> When your coverage could come from more than one agreement, the check asks you to pick one — through the portal, or with a command below.</p>
+    </div>
+
+    <h2 class="mt-8 font-serif text-lg font-semibold">The commands</h2>
+    <p class="mt-3 max-w-prose text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+      Write any of these as a comment on your pull request — the check replies to the pull request's own contributors.
+    </p>
+    <div class="mt-3 overflow-hidden rounded-sm border border-rule bg-white dark:bg-ink-2">
+      <table class="w-full text-sm">
+        <tbody>
+          <tr class="border-b border-rule last:border-0"><td class="px-4 py-3 font-mono text-ink dark:text-white whitespace-nowrap">@ribose-cla help</td><td class="px-4 py-3 text-slate-600 dark:text-slate-400">Every command, listed in the thread.</td></tr>
+          <tr class="border-b border-rule last:border-0"><td class="px-4 py-3 font-mono text-ink dark:text-white whitespace-nowrap">@ribose-cla agree</td><td class="px-4 py-3 text-slate-600 dark:text-slate-400">Sign from the pull request: the check posts your personal sign link.</td></tr>
+          <tr class="border-b border-rule last:border-0"><td class="px-4 py-3 font-mono text-ink dark:text-white whitespace-nowrap">@ribose-cla agree icla</td><td class="px-4 py-3 text-slate-600 dark:text-slate-400">Elect the Individual CLA when the check asks you to choose an agreement.</td></tr>
+          <tr class="border-b border-rule last:border-0"><td class="px-4 py-3 font-mono text-ink dark:text-white whitespace-nowrap">@ribose-cla agree company=&lt;org&gt;</td><td class="px-4 py-3 text-slate-600 dark:text-slate-400">Elect your organization's CLA when you are on its roster; when you are not, it files a join request with the organization's Point of Contact.</td></tr>
+          <tr class="border-b border-rule last:border-0"><td class="px-4 py-3 font-mono text-ink dark:text-white whitespace-nowrap">@ribose-cla third-party: &lt;name&gt; (SPDX: &lt;license&gt;)</td><td class="px-4 py-3 text-slate-600 dark:text-slate-400">Declare work submitted on behalf of a third party, under a license Ribose accepts (the Agreement's third-party clause).</td></tr>
+          <tr class="border-b border-rule last:border-0"><td class="px-4 py-3 font-mono text-ink dark:text-white whitespace-nowrap">@ribose-cla status</td><td class="px-4 py-3 text-slate-600 dark:text-slate-400">Your own coverage, answered live in the thread.</td></tr>
+          <tr class="border-b border-rule last:border-0"><td class="px-4 py-3 font-mono text-ink dark:text-white whitespace-nowrap">@ribose-cla recheck</td><td class="px-4 py-3 text-slate-600 dark:text-slate-400">Re-run the check on the current head — the manual fallback after signing elsewhere.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 class="mt-8 font-serif text-lg font-semibold">The full guide</h2>
+    <p class="mt-3 max-w-prose text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+      <a class="underline decoration-rule hover:decoration-ink dark:hover:decoration-white" href="https://github.com/riboseinc/cla/blob/main/docs/SIGNING.md">How to sign the Ribose CLA</a> describes the signing flow in full — identity, editions, and what happens when an edition changes.
+    </p>
+  </div>
+</Base>

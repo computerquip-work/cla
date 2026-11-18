@@ -382,3 +382,46 @@ describe("minimal change (proportionality, issue #58)", () => {
     expect(v.verdict).toBe("fail");
   });
 });
+
+describe("kernel: duplicate live records fold to one agreement (rnp#2573)", () => {
+  it("two live ICLA records for one login read as covered, not must-specify", () => {
+    const v = evaluate(
+      pr([login("r404r")]),
+      snapshot({ iclas: [icla({ id: "icla-1", githubLogin: "r404r" }), icla({ id: "icla-2", githubLogin: "r404r" })] }),
+      config(),
+      EDITIONS,
+    );
+    expect(v.verdict).toBe("pass");
+    expect(v.missing).toEqual([]);
+    expect(Object.keys(v.mustSpecify)).toEqual([]);
+    expect(v.committers).toEqual([{ login: "r404r", status: "covered", path: "icla", agreement: { kind: "icla", version: "1.0" }, matchedBy: "login" }]);
+  });
+
+  it("an ICLA and an OCLA remain a genuine must-specify after folding", () => {
+    const v = evaluate(
+      pr([login("dual")]),
+      snapshot({
+        iclas: [icla({ id: "icla-1", githubLogin: "dual" })],
+        oclas: [ocla({ covered: [{ githubLogin: "dual", email: "d@example.com" }] })],
+      }),
+      config(),
+      EDITIONS,
+    );
+    // must-specify is a pass verdict with an action_required conclusion:
+    // the ambiguity is a question for the contributor, not a failure.
+    expect(v.verdict).toBe("pass");
+    expect(Object.keys(v.mustSpecify)).toEqual(["dual"]);
+    expect(v.mustSpecify["dual"]).toHaveLength(2);
+  });
+
+  it("an email-matched duplicate pair also folds to covered", () => {
+    const v = evaluate(
+      pr([{ login: null, email: "a@example.com" }]),
+      snapshot({ iclas: [icla({ id: "icla-1" }), icla({ id: "icla-2" })] }),
+      config(),
+      EDITIONS,
+    );
+    expect(v.verdict).toBe("pass");
+    expect(Object.keys(v.mustSpecify)).toEqual([]);
+  });
+});

@@ -143,3 +143,17 @@ export function thirdPartyGate(accepted: string[] | undefined, spdx: string): Th
   }
   return { allowed: true, spdx: hit };
 }
+
+/** The meta commands (2026-11-18, the rnp#2573 discoverability work):
+ *  `@ribose-cla help` - everything the check supports;
+ *  `@ribose-cla status` - the caller's own live coverage;
+ *  `@ribose-cla recheck` - re-run the evaluation on the current head. */
+export type MetaCommand = "help" | "status" | "recheck";
+
+export function parseMetaCommand(body: string): MetaCommand | undefined {
+  const t = body.trim().toLowerCase();
+  if (t === "@ribose-cla help") return "help";
+  if (t === "@ribose-cla status") return "status";
+  if (t === "@ribose-cla recheck") return "recheck";
+  return undefined;
+}

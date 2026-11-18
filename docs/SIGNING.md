@@ -93,3 +93,27 @@ If your company has an executed Organization CLA, your employer's
 Point of Contact adds your GitHub handle to its Schedule A, which
 covers you without an individual signature. You can also request
 coverage yourself at [cla.ribose.com/organizations](https://cla.ribose.com/organizations).
+
+## Third-party material
+
+If a contribution includes work that is not your original creation, the
+Agreement's third-party clause lets you submit it on behalf of a named
+third party. Declare it on the pull request:
+
+```text
+@ribose-cla third-party: <name> (SPDX: <license-id>)
+```
+
+For example:
+
+```text
+@ribose-cla third-party: Example Corp (SPDX: MIT)
+```
+
+The SPDX identifier is required, and it must be on Ribose's
+accepted-license list. A declaration with a missing or unaccepted license
+is refused, and nothing is recorded. When accepted, the App adds the
+marking to the pull request description and states the obligations in its
+reply. The declaration does not replace your own agreement — your
+signature still gates the check.
+

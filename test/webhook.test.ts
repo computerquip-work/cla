@@ -502,6 +502,17 @@ describe("CI accounts are preapproved (issue #83)", () => {
     expect(body).toContain("- @example-ci — contributed under **configuration allowlist**");
     expect(body).not.toContain("Individual CLA");
   });
+
+  it("the closing statement carries the third-party SPDX id; a pre-#118 declaration says the license was not recorded", () => {
+    const verdict: PrVerdict = {
+      verdict: "pass",
+      committers: [{ login: "tj-91", status: "covered", path: "icla", agreement: { kind: "icla", version: "1.0" }, matchedBy: "login" }],
+      missing: [],
+      mustSpecify: {},
+    };
+    expect(closingComment(verdict, {}, { name: "Example Corp", spdx: "MIT" })).toContain("third party: **Example Corp** (declared under the Agreement's third-party clause; SPDX MIT)");
+    expect(closingComment(verdict, {}, { name: "Old Corp" })).toContain("license not recorded");
+  });
 });
 
 describe("the separate-agreement registry (MSA)", () => {

@@ -13,7 +13,14 @@ export function makeListRecords(api: GithubApi, installationId: number, dataRepo
   return async (): Promise<RecordLister> => {
     const tree = await api.request(installationId, "GET", `/repos/${dataRepo}/git/trees/HEAD?recursive=1`, { etagPath: `tree:${dataRepo}:HEAD` });
     if (tree.status !== 200) throw new Error(`data repo tree listing failed: ${tree.status}`);
-    const parsed = JSON.parse(tree.body) as { tree?: Array<{ path?: string; type?: string }> };
+    const parsed = JSON.parse(tree.body) as { tree?: Array<{ path?: string; type?: string }>; truncated?: boolean };
+    // The trees API CAPS a recursive listing (entry and byte limits) and
+    // says so with `truncated` — the response is then a listing with
+    // holes, and a hole reads as "this person never signed". A partial
+    // tree is never a snapshot: refuse it (issue #104).
+    if (parsed.truncated === true) {
+      throw new Error("data repo tree listing is truncated: refusing to evaluate an incomplete record set");
+    }
     const paths = (parsed.tree ?? [])
       .filter((e) => e.type === "blob" && typeof e.path === "string" && e.path.endsWith(".json") && namespaces.some((ns) => e.path!.startsWith(ns)))
       .map((e) => e.path!);
@@ -22,10 +29,13 @@ export function makeListRecords(api: GithubApi, installationId: number, dataRepo
     await Promise.all(
       paths.map(async (p) => {
         const res = await api.request(installationId, "GET", `/repos/${dataRepo}/contents/${p}`);
-        if (res.status === 200) {
-          const j = JSON.parse(res.body) as { content?: string; encoding?: string };
-          blobs.set(p, j.encoding === "base64" ? Buffer.from(j.content ?? "", "base64").toString("utf8") : (j.content ?? ""));
-        }
+        // A read that did not happen is NOT an invalid record: folding the
+        // miss into `rejected` (as a vanished file would read downstream)
+        // quietly deletes a signature's coverage — the false "outstanding"
+        // gap of issue #104. Throw, so the caller fails honestly instead.
+        if (res.status !== 200) throw new Error(`data repo record read failed: ${p} (${res.status})`);
+        const j = JSON.parse(res.body) as { content?: string; encoding?: string };
+        blobs.set(p, j.encoding === "base64" ? Buffer.from(j.content ?? "", "base64").toString("utf8") : (j.content ?? ""));
       }),
     );
 

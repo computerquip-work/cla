@@ -19,10 +19,28 @@ export type StoreDeps = {
   listRecords: () => Promise<RecordLister>;
 };
 
+export type EditionDivergence = {
+  path: string;
+  kind: "icla" | "ocla";
+  version: string;
+  /** The hash the stored record was signed against. */
+  recordSha256: string;
+  /** The hash this deployment compiled for the same version. */
+  currentSha256: string;
+};
+
 export type LoadedSnapshot = {
   snapshot: StoreSnapshot;
   /** Records that failed validation — fail-visible, never silent. */
   rejected: { path: string; reason: string }[];
+  /** Records that declare the SAME {kind, version} as this deploy's
+   *  current edition with a DIFFERENT text hash. Editions are
+   *  content-addressed, so a version's text is fixed: the stored record
+   *  and the compiled bundle cannot both be right, and every record of
+   *  that edition reads as not-live — a covered person as "missing",
+   *  which is the false gap of issue #104. Empty is the only healthy
+   *  value; the callers above must fail loudly, never blame the person. */
+  editionDivergences: EditionDivergence[];
   /** Schedule-A modifications (the console's history view). */
   mods: OclaModRecord[];
   /** org_admin role records (portal authorization). */
@@ -46,6 +64,14 @@ export async function loadSnapshot(deps: StoreDeps, editions: Editions): Promise
   const attributions: NonNullable<StoreSnapshot["attributions"]> = [];
   const thirdParties: NonNullable<StoreSnapshot["thirdParties"]> = [];
   const rejected: { path: string; reason: string }[] = [];
+  const editionDivergences: EditionDivergence[] = [];
+
+  const diverged = (kind: "icla" | "ocla", edition: { version: string; textSha256: string }, path: string): void => {
+    const current = editions[kind];
+    if (edition.version === current.version && edition.textSha256 !== current.textSha256) {
+      editionDivergences.push({ path, kind, version: edition.version, recordSha256: edition.textSha256, currentSha256: current.textSha256 });
+    }
+  };
 
   const sorted = [...paths].sort(); // creation order: ts-encoded paths sort correctly
   for (const path of sorted) {
@@ -58,10 +84,16 @@ export async function loadSnapshot(deps: StoreDeps, editions: Editions): Promise
     }
     if (path.startsWith("icla/")) {
       const r = parseIcla(parsed);
-      r ? iclas.push(r) : rejected.push({ path, reason: "invalid icla" });
+      if (r) {
+        iclas.push(r);
+        diverged("icla", r.edition, path);
+      } else rejected.push({ path, reason: "invalid icla" });
     } else if (path.startsWith("ocla/")) {
       const r = parseOcla(parsed);
-      r ? oclas.push(r) : rejected.push({ path, reason: "invalid ocla" });
+      if (r) {
+        oclas.push(r);
+        diverged("ocla", r.edition, path);
+      } else rejected.push({ path, reason: "invalid ocla" });
     } else if (path.startsWith("ocla-mod/")) {
       const r = parseOclaMod(parsed);
       if (r) {
@@ -114,6 +146,7 @@ export async function loadSnapshot(deps: StoreDeps, editions: Editions): Promise
       thirdParties,
     },
     rejected,
+    editionDivergences,
     mods,
     roles: roles.filter((r) => !revoked.has(r.id)),
     links: links.filter((l) => !revoked.has(l.id)),

@@ -43,7 +43,7 @@ const INSTALLATIONS: Record<string, unknown> = {
   "/app/installations/1/access_tokens": { token: "ghs_data_1" },
 };
 
-const DATA_OCLA = () => ({
+export const DATA_OCLA = () => ({
   id: "ocla-mtg",
   orgSlug: "mtg-ag",
   claEdition: { kind: "ocla", version: CURRENT_EDITIONS.ocla.version, textSha256: CURRENT_EDITIONS.ocla.sha256 },

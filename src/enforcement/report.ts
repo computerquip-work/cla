@@ -222,6 +222,7 @@ export async function repoCoverageStep(
       : consumed >= page.length
         ? { page: cursor.page + 1, offset: 0 }
         : { page: cursor.page, offset: consumed };
+  const short = (sha: string): string => sha.slice(0, 8);
   return {
     org: slice[0]?.split("/")[0] ?? null,
     total: body.total_count ?? page.length,
@@ -233,6 +234,20 @@ export async function repoCoverageStep(
       // whole-estate gap that looks like ordinary drift. The report says
       // what it actually loaded, and names rejected records (fail-visible).
       `records loaded: ${snapshot.iclas.length} ICLA, ${snapshot.oclas.length} OCLA${loaded.rejected.length > 0 ? `; ${loaded.rejected.length} rejected: ${loaded.rejected.slice(0, 5).map((r) => `${r.path} (${r.reason})`).join(", ")}` : ""}`,
+      // Which editions THIS deploy evaluated against, and whether the data
+      // repo agrees with them (issue #104): a stale bundle reads a covered
+      // person as stale (or outstanding, when the record is missing), and
+      // without this line that looks exactly like ordinary drift. Capture
+      // this with notes[0] when reporting.
+      `evaluating as: icla v${editions.icla.version} sha ${short(editions.icla.textSha256)}, ocla v${editions.ocla.version} sha ${short(editions.ocla.textSha256)} — the editions this deployment compiled; compare with /editions`,
+      ...(loaded.editionDivergences.length > 0
+        ? [
+            `edition mismatch — this deployment is stale, and the states below are not trustworthy: ${loaded.editionDivergences
+              .slice(0, 3)
+              .map((d) => `${d.path} declares ${d.kind} v${d.version} sha ${short(d.recordSha256)}, this deployment compiled sha ${short(d.currentSha256)}`)
+              .join("; ")}. Editions are content-addressed, so these cannot both be correct; redeploy from current instance config (riboseinc/cla#104)`,
+          ]
+        : []),
       "required-check status is not readable by the App (it holds no administration permission) — tracked per repo in riboseinc/cla#53",
       "excluded repositories (coverage.repos_without_cla) are reported with in_scope=false and no contributors",
     ],

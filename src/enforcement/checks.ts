@@ -64,6 +64,29 @@ export function checkRunBody(verdict: PrVerdict, portalBase: string, signingDocs
   };
 }
 
+/** The deployment and the data repo disagree about an edition's text
+ *  (issue #104): every record of that edition reads as not-live, so the
+ *  kernel would report covered people as `missing`. The failure is the
+ *  deployment's, never the contributor's — say so, fail closed. */
+export function staleDeploymentBody(d: { path: string; kind: string; version: string; recordSha256: string; currentSha256: string }): Record<string, unknown> {
+  const sha = (s: string): string => s.slice(0, 8);
+  return {
+    name: CHECK_NAME,
+    status: "completed",
+    conclusion: "failure",
+    output: {
+      title: `CLA (${CHECK_NAME})`,
+      summary: [
+        "The CLA check cannot read a trustworthy coverage answer from this deployment, so it fails closed. No contributor action is needed.",
+        "",
+        `This deployment compiled ${d.kind} v${d.version} with text sha ${sha(d.currentSha256)}, but the stored agreement record ${d.path} was signed against ${d.kind} v${d.version} sha ${sha(d.recordSha256)}. Agreement editions are content-addressed, so these cannot both be correct: the deployed configuration is out of date.`,
+        "",
+        "A maintainer must redeploy the worker from current instance config; this check turns green on its own after that.",
+      ].join("\n"),
+    },
+  };
+}
+
 export async function createCheckRun(
   api: GithubApi,
   installationId: number,

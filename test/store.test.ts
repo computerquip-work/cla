@@ -127,6 +127,31 @@ describe("loadSnapshot: the record tree becomes a kernel snapshot", () => {
     };
     const v = await loadAndEvaluate(fixture(files), EDITIONS, { context: { org: "o", repo: "r", pr: 1 }, committers: [{ login: "a" }] }, CFG);
     expect(v.verdict.committers[0]?.status).toBe("missing");
+    // An older edition is a stale SIGNATURE, not a stale deployment: it is
+    // not a divergence (issue #104).
+    expect(v.loaded.editionDivergences).toEqual([]);
+  });
+
+  it("a record declaring the current version with another hash is an edition divergence (issue #104)", async () => {
+    // Editions are content-addressed, so version 1.0's text is fixed: a
+    // record that says "1.0, sha othersha" and a bundle that says
+    // "1.0, sha ocla1sha" cannot both be right. The record then reads
+    // not-live and a covered person surfaces as `missing` — which is
+    // exactly the failure the deployment must be named for.
+    const files = {
+      "ocla/2026/03/o.json": {
+        id: "o1",
+        orgSlug: "mtg-ag",
+        claEdition: { kind: "ocla", version: "1.0", textSha256: "othersha" },
+        covered: [{ githubLogin: "tj-91" }],
+      },
+    };
+    const loaded = await loadSnapshot(fixture(files), EDITIONS);
+    expect(loaded.editionDivergences).toEqual([
+      { path: "ocla/2026/03/o.json", kind: "ocla", version: "1.0", recordSha256: "othersha", currentSha256: "ocla1sha" },
+    ]);
+    const v = await loadAndEvaluate(fixture(files), EDITIONS, { context: { org: "o", repo: "r", pr: 1 }, committers: [{ login: "tj-91" }] }, CFG);
+    expect(v.verdict.verdict).toBe("fail");
   });
 });
 

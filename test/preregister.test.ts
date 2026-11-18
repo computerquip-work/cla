@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { createApp } from "../src/app";
-import { makeFixture, makeKeyPem, signedBody, WEBHOOK_SECRET, type Fixture } from "./helpers";
+import { makeFixture, makeKeyPem, signedBody, CURRENT_EDITIONS, DATA_OCLA, WEBHOOK_SECRET, type Fixture } from "./helpers";
 import { CHECK_NAME } from "../src/enforcement/checks";
 
 /**
@@ -166,6 +166,42 @@ describe("POST /admin/evaluate: on-demand re-evaluation of one PR", () => {
     const check = checkRunsPosted().find((c) => c.url.endsWith("/repos/rnpgp/rnp/check-runs"));
     expect(check).toBeDefined();
     expect(check!.body).toMatchObject({ name: CHECK_NAME, head_sha: "abc123" });
+    // The audit entry carries the bundle's own evidence: what the store
+    // delivered and which compiled editions served the verdict (#104).
+    expect(out["outcome"]).toContain("records=1I/1O");
+    expect(out["outcome"]).toContain(`editions=${CURRENT_EDITIONS.icla.sha256.slice(0, 8)}/${CURRENT_EDITIONS.ocla.sha256.slice(0, 8)}`);
+  });
+
+  it("a stale deployment fails the check with the deployment named — never asks a covered person to sign (issue #104)", async () => {
+    fx.routes.set("/repos/rnpgp/rnp/installation", () => Response.json({ id: 42 }, { status: 200 }));
+    fx.routes.set("/repos/rnpgp/rnp/pulls/1", () => Response.json({ head: { sha: "abc123" } }, { status: 200 }));
+    // The stored OCLA was signed against a different OCLA text for this
+    // same version: this bundle can only read it as not-live.
+    fx.routes.set("/repos/example-org/cla-data/contents/ocla/2026/03/mtg.json", () =>
+      Response.json(
+        {
+          content: Buffer.from(
+            JSON.stringify({ ...DATA_OCLA(), claEdition: { kind: "ocla", version: CURRENT_EDITIONS.ocla.version, textSha256: "0".repeat(64) } }),
+          ).toString("base64"),
+          encoding: "base64",
+        },
+        { status: 200 },
+      ),
+    );
+
+    const res = await post("/admin/evaluate", { repo: "rnpgp/rnp", pr: 1 });
+    expect(res.status).toBe(200);
+    const out = (await res.json()) as Record<string, unknown>;
+    expect(out["handled"]).toBe(true);
+    expect(out["outcome"]).toContain("stale-deployment");
+    const check = checkRunsPosted().find((c) => c.url.endsWith("/repos/rnpgp/rnp/check-runs"));
+    expect(check!.body).toMatchObject({ conclusion: "failure" });
+    const summary = ((check!.body as Record<string, unknown>)["output"] as Record<string, unknown>)["summary"] as string;
+    expect(summary).toContain("out of date");
+    expect(summary).toContain("No contributor action is needed");
+    // The failure is the deployment's: nobody is asked for a signature.
+    expect(summary).not.toContain("sign the Individual CLA");
+    expect(fx.calls.some((c) => c.method === "POST" && c.url.endsWith("/issues/1/comments"))).toBe(false);
   });
 
   it("an explicit head_sha skips the pull request lookup", async () => {

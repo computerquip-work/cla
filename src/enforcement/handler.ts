@@ -9,7 +9,7 @@ import type { GithubApi } from "../github/api";
 import { makeListRecords } from "../store/github-store";
 import { appendRecord } from "../store/write";
 import { randomToken } from "../portal/github-oauth";
-import { checkRunBody, createCheckRun, commentBody, conclusionFor, upsertComment, retractCoverageComment, postClosingComment, closingComment, preRegisterCheck, CHECK_NAME } from "./checks";
+import { checkRunBody, createCheckRun, commentBody, conclusionFor, upsertComment, retractCoverageComment, postClosingComment, closingComment, preRegisterCheck, staleDeploymentBody, CHECK_NAME } from "./checks";
 import { signAttributionToken, optionKey } from "../portal/attribution";
 import { signCompletionToken, parseAgreeCommand, parseThirdPartyCommand, type AgreeCommand } from "../portal/completion";
 
@@ -67,6 +67,19 @@ export async function evaluatePullRequest(
   );
   loaded.snapshot.msaLogins = deps.config.instance.separateAgreement?.logins ?? [];
   loaded.snapshot.msaEmails = deps.config.instance.separateAgreement?.emails ?? [];
+  // A stale deployment makes every record of the current edition read as
+  // not-live: the verdict would be a false "missing" and the comment would
+  // ask a covered contributor to sign what they already signed (issue
+  // #104). Name the deployment, fail closed, blame no person.
+  if (loaded.editionDivergences.length > 0) {
+    const d = loaded.editionDivergences[0]!;
+    await createCheckRun(deps.api, args.installationId, full, args.headSha, staleDeploymentBody(d));
+    await retractCoverageComment(deps.api, args.installationId, full, args.prNumber);
+    return {
+      handled: true,
+      outcome: `stale-deployment: ${d.path} declares ${d.kind} v${d.version} sha ${d.recordSha256.slice(0, 8)}, this deploy compiled ${d.currentSha256.slice(0, 8)}`,
+    };
+  }
   const verdict = evaluate({ context: { org, repo, pr: args.prNumber }, committers, diff }, loaded.snapshot, deps.config, editions);
 
   const portalBase = `https://${deps.config.instance.portalHost}`;
@@ -97,7 +110,7 @@ export async function evaluatePullRequest(
     }
     await upsertComment(deps.api, args.installationId, full, args.prNumber, commentBody(verdict, portalBase, { attributionLinks, signingDocsUrl, staleEditions }));
   }
-  return { handled: true, outcome: `verdict=${verdict.verdict} missing=${verdict.missing.length} specify=${Object.keys(verdict.mustSpecify).length}` };
+  return { handled: true, outcome: `verdict=${verdict.verdict} missing=${verdict.missing.length} specify=${Object.keys(verdict.mustSpecify).length} records=${loaded.snapshot.iclas.length}I/${loaded.snapshot.oclas.length}O editions=${editions.icla.textSha256.slice(0, 8)}/${editions.ocla.textSha256.slice(0, 8)}` };
 }
 
 /** pull_request.closed + merged — the closing attribution statement (deduped). */
@@ -115,6 +128,16 @@ export async function closeMergedPullRequest(
     { listRecords: makeListRecords(deps.api, deps.config.github.dataInstallationId, deps.config.github.dataRepo) },
     editions,
   );
+  // The closing statement is the public attribution record (append-only):
+  // a stale deployment would read covered committers as uncovered and
+  // write "merged without CLA coverage" about them. Refuse, loudly — the
+  // webhook retries after a correct deploy (issue #104).
+  if (loaded.editionDivergences.length > 0) {
+    const d = loaded.editionDivergences[0]!;
+    throw new Error(
+      `refusing to post an attribution statement from a stale deployment: ${d.path} declares ${d.kind} v${d.version} sha ${d.recordSha256.slice(0, 8)}, this deploy compiled ${d.currentSha256.slice(0, 8)}`,
+    );
+  }
   const { committers } = await fetchPrCommitters(deps.api, args.installationId, full, args.prNumber);
   const diff = await fetchPrStats(deps.api, args.installationId, full, args.prNumber);
   loaded.snapshot.msaLogins = deps.config.instance.separateAgreement?.logins ?? [];

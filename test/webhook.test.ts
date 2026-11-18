@@ -4,7 +4,7 @@ import { beforeEach } from "vitest";
 import { verifyWebhookSignature, parseEvent } from "../src/github/webhook";
 import { conclusionFor, commentBody, closingComment, COMMENT_MARKER, CHECK_NAME } from "../src/enforcement/checks";
 import { fetchPrCommitters } from "../src/github/pulls";
-import { makeFixture, pullRequestPayload, signedBody, makeKeyPem, hmacHex, WEBHOOK_SECRET, type Fixture } from "./helpers";
+import { makeFixture, pullRequestPayload, signedBody, makeKeyPem, hmacHex, WEBHOOK_SECRET, CURRENT_EDITIONS, DATA_OCLA, type Fixture } from "./helpers";
 import { GithubApi, type GithubApiDeps } from "../src/github/api";
 import type { PrVerdict } from "@riboseinc/cla-kernel";
 
@@ -348,6 +348,35 @@ describe("minimal change: honest disclosure (issue #58)", () => {
     const closing = fx.calls.find((c) => c.method === "POST" && c.url.endsWith("/issues/1/comments"));
     expect(closing).toBeDefined();
     expect((closing!.body as Record<string, unknown>)["body"]).toContain("under the minimal-change threshold");
+  });
+
+  it("a stale deployment refuses to write an attribution statement it cannot trust (issue #104)", async () => {
+    const pem = await makeKeyPem();
+    const fx: Fixture = makeFixture();
+    // Signed against a different OCLA text for the same version: this
+    // bundle reads every one of those records as not-live, so the closing
+    // statement would publish "merged without CLA coverage" about a
+    // covered contributor — an append-only falsehood.
+    fx.routes.set("/repos/example-org/cla-data/contents/ocla/2026/03/mtg.json", () =>
+      Response.json(
+        {
+          content: Buffer.from(
+            JSON.stringify({ ...DATA_OCLA(), claEdition: { kind: "ocla", version: CURRENT_EDITIONS.ocla.version, textSha256: "0".repeat(64) } }),
+          ).toString("base64"),
+          encoding: "base64",
+        },
+        { status: 200 },
+      ),
+    );
+    const app = createApp({ WEBHOOK_SECRET, GITHUB_APP_ID: "1", APP_PRIVATE_KEY: pem }, { fetcher: fx.fetcher });
+    const merged = { ...pullRequestPayload(), action: "closed", pull_request: { merged: true, head: { sha: "abc123" } } };
+    const { body, headers } = await signedBody(WEBHOOK_SECRET, merged);
+    const res = await app.request("/api/github/webhook", { method: "POST", body, headers: { ...headers, "x-github-event": "pull_request" } });
+
+    // Honest failure (GitHub redelivers after a correct deploy), never a
+    // silent skip and never a false record.
+    expect(res.status).toBe(503);
+    expect(fx.calls.some((c) => c.method === "POST" && c.url.endsWith("/issues/1/comments"))).toBe(false);
   });
 });
 

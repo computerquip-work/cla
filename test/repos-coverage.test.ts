@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach } from "vitest";
 import type { Config, Editions, StoreSnapshot } from "@riboseinc/cla-kernel";
 import { createApp } from "../src/app";
 import { repoRow } from "../src/enforcement/report";
-import { makeFixture, makeKeyPem, CURRENT_EDITIONS, type Fixture } from "./helpers";
+import { makeFixture, makeKeyPem, CURRENT_EDITIONS, DATA_OCLA, type Fixture } from "./helpers";
 
 /**
  * The repo-centric coverage report (issue #88): repos x people x state.
@@ -167,6 +167,42 @@ describe("repos-coverage: route posture", () => {
     // A store that loaded nothing reads as "everyone outstanding" — the
     // report must say what it loaded so that failure is never silent.
     expect(out.notes[0]).toBe("records loaded: 1 ICLA, 1 OCLA");
+    // …and WHICH editions this deploy evaluated against: without that
+    // line a stale bundle is indistinguishable from ordinary drift
+    // (issue #104).
+    expect(out.notes[1]).toContain(`icla v${CURRENT_EDITIONS.icla.version} sha ${CURRENT_EDITIONS.icla.sha256.slice(0, 8)}`);
+    expect(out.notes[1]).toContain(`ocla v${CURRENT_EDITIONS.ocla.version} sha ${CURRENT_EDITIONS.ocla.sha256.slice(0, 8)}`);
+  });
+
+  it("a stale bundle names itself: the stored edition hash disagrees with the compiled one (issue #104)", async () => {
+    listRepos(["org/a"]);
+    fx.routes.set("/repos/org/a/commits", () => Response.json([commit("tj-91", "johannes@mtg.example")], { status: 200 }));
+    // Only the OCLA in the tree, signed against a DIFFERENT OCLA 1.0 text
+    // than this deployment compiled: every record of that edition reads
+    // not-live, so a covered person surfaces as stale.
+    fx.routes.set("/repos/example-org/cla-data/git/trees/HEAD", () => Response.json({ tree: [{ path: "ocla/2026/03/mtg.json", type: "blob" }] }, { status: 200 }));
+    fx.routes.set("/repos/example-org/cla-data/contents/ocla/2026/03/mtg.json", () =>
+      Response.json(
+        {
+          content: Buffer.from(
+            JSON.stringify({ ...DATA_OCLA(), claEdition: { kind: "ocla", version: CURRENT_EDITIONS.ocla.version, textSha256: "0".repeat(64) } }),
+          ).toString("base64"),
+          encoding: "base64",
+        },
+        { status: 200 },
+      ),
+    );
+
+    const out = (await (await get("?installation_id=42")).json()) as any;
+    const notes = (out.notes as string[]).join(" ");
+    expect(notes).toContain("edition mismatch");
+    expect(notes).toContain(`this deployment compiled sha ${CURRENT_EDITIONS.ocla.sha256.slice(0, 8)}`);
+    expect(notes).toContain("not trustworthy");
+    // The state word here is `stale` — "a record exists but is not live" —
+    // which an operator would otherwise read as "they signed an old
+    // edition". Only the note distinguishes a stale signature from a
+    // stale deployment (issue #104).
+    expect(out.repos[0].contributors[0]).toMatchObject({ login: "tj-91", state: "stale" });
   });
 
   it("a step covers `limit` repos and hands back the cursor", async () => {

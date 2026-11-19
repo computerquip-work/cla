@@ -104,6 +104,15 @@ coverage:
   # re-runs, with no completion link. OFF: counsel's call (tracker #16).
   comment_signing:
     automatic: false
+  # Coverage by GitHub-org membership (issue #16 item 4): a GitHub org
+  # login -> the OCLA slug its members are DESIGNATED under — the
+  # GitHub-org alternative to a named Schedule A row. Consulted only
+  # when no signature covers the committer, and it never invents
+  # coverage: the mapped OCLA must be live. Requires the App installed
+  # on the GitHub org with Members: read; a lookup failure fails the
+  # check (fail-closed). Absent = OFF (the default).
+  # org_membership:
+  #   example-corp: example-ocla-slug
   notify:
     digest_threshold: 10
     from: "Ribose CLA <cla@notify.example.org>"

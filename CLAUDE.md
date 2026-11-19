@@ -39,12 +39,17 @@ Single file/case: `npm test -- test/foo.test.ts`, `npm test -- -t "name"`.
    editions (deprecation marks `current`, files are never deleted).
 5. **Coverage precedence** (kernel): separate-agreement registry ->
    allowlist -> current ICLA -> current OCLA Schedule A (mods folded in
-   order). Multiple paths => must-specify, never guess. The signature is
-   the coverage: employment or a service agreement alone covers nobody
-   *unless* the login is on the static registry (`separate_agreement`),
-   which is itself the coverage — those contributors never sign, are
-   never asked, and are attributed under "an existing Ribose agreement"
-   with no instrument name and no classification.
+   order), and only when no signature matched -> GitHub-org membership
+   designating the login under a mapped *live* OCLA
+   (`coverage.org_membership`, OFF when absent). Multiple paths =>
+   must-specify, never guess. The signature is the coverage: employment
+   or a service agreement alone covers nobody *unless* the login is on
+   the static registry (`separate_agreement`), which is itself the
+   coverage — those contributors never sign, are never asked, and are
+   attributed under "an existing Ribose agreement"
+   with no instrument name and no classification. Org membership is not
+   coverage either: it names who a signed OCLA covers, and without that
+   live OCLA it designates nobody.
 6. **Editions are content-addressed** — `{kind, version, text_sha256}`;
    staleness is evaluated lazily; no migration jobs.
 7. **Least privilege** — the App never configures branch protection

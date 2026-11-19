@@ -13,6 +13,7 @@ import { checkRunBody, createCheckRun, commentBody, conclusionFor, upsertComment
 import { signAttributionToken, optionKey } from "../portal/attribution";
 import { signCompletionToken, parseAgreeCommand, parseThirdPartyCommand, parseMetaCommand, thirdPartyGate, type AgreeCommand } from "../portal/completion";
 import { iclaRecordId } from "../portal/helpers";
+import { evaluateWithOrgMembership, resolveOrgMemberships } from "./org-membership";
 
 /**
  * The pull_request orchestration (docs/design.md §5). Every store or
@@ -81,7 +82,9 @@ export async function evaluatePullRequest(
       outcome: `stale-deployment: ${d.path} declares ${d.kind} v${d.version} sha ${d.recordSha256.slice(0, 8)}, this deploy compiled ${d.currentSha256.slice(0, 8)}`,
     };
   }
-  const verdict = evaluate({ context: { org, repo, pr: args.prNumber }, committers, diff }, loaded.snapshot, deps.config, editions);
+  const verdict = await evaluateWithOrgMembership(deps.api, deps.config, loaded.snapshot, () =>
+    evaluate({ context: { org, repo, pr: args.prNumber }, committers, diff }, loaded.snapshot, deps.config, editions),
+  );
 
   const portalBase = `https://${deps.config.instance.portalHost}`;
   const signingDocsUrl = deps.config.instance.signingDocsUrl;
@@ -108,7 +111,7 @@ export async function evaluatePullRequest(
     // until the signatory re-executes, and telling them only "sign the
     // ICLA" hides the reason and the real remedy.
     const staleEditions: Record<string, { signed: string; current: string }> = {};
-    const staleOclas: Record<string, { orgSlug: string; signed: string; current: string }> = {};
+    const staleOclas: Record<string, { orgSlug: string; signed: string; current: string; viaOrgMembership?: boolean }> = {};
     for (const login of verdict.missing) {
       const stale = loaded.snapshot.iclas.find((r) => r.githubLogin.toLowerCase() === login.toLowerCase() && r.edition.textSha256 !== editions.icla.textSha256);
       if (stale) {
@@ -120,7 +123,25 @@ export async function evaluatePullRequest(
       const superseded = [...loaded.snapshot.oclas]
         .reverse()
         .find((o) => o.edition.textSha256 !== editions.ocla.textSha256 && o.covered.some((row) => row.githubLogin.toLowerCase() === login.toLowerCase()));
-      if (superseded) staleOclas[login] = { orgSlug: superseded.orgSlug, signed: superseded.edition.version, current: editions.ocla.version };
+      if (superseded) {
+        staleOclas[login] = { orgSlug: superseded.orgSlug, signed: superseded.edition.version, current: editions.ocla.version };
+        continue;
+      }
+      // A member of a MAPPED GitHub org reads the same way when the
+      // mapped OCLA goes stale (issue #16 item 4): their coverage
+      // stopped because the instrument did, and the generic "sign the
+      // ICLA" hides that reason and the real remedy — the same honesty
+      // #123 gave named Schedule A rows.
+      const mappedSlugs = (loaded.snapshot.orgMembers ?? [])
+        .filter((m) => m.login.toLowerCase() === login.toLowerCase())
+        .map((m) => deps.config.coverage.orgMembership?.[m.org.toLowerCase()])
+        .filter((s): s is string => Boolean(s));
+      const staleViaMembership = [...loaded.snapshot.oclas]
+        .reverse()
+        .find((o) => o.edition.textSha256 !== editions.ocla.textSha256 && mappedSlugs.includes(o.orgSlug.toLowerCase()));
+      if (staleViaMembership) {
+        staleOclas[login] = { orgSlug: staleViaMembership.orgSlug, signed: staleViaMembership.edition.version, current: editions.ocla.version, viaOrgMembership: true };
+      }
     }
     await upsertComment(deps.api, args.installationId, full, args.prNumber, commentBody(verdict, portalBase, { attributionLinks, signingDocsUrl, staleEditions, staleOclas }));
   }
@@ -156,7 +177,9 @@ export async function closeMergedPullRequest(
   const diff = await fetchPrStats(deps.api, args.installationId, full, args.prNumber);
   loaded.snapshot.msaLogins = deps.config.instance.separateAgreement?.logins ?? [];
   loaded.snapshot.msaEmails = deps.config.instance.separateAgreement?.emails ?? [];
-  const verdict = evaluate({ context: { org, repo, pr: args.prNumber }, committers, diff }, loaded.snapshot, deps.config, editions);
+  const verdict = await evaluateWithOrgMembership(deps.api, deps.config, loaded.snapshot, () =>
+    evaluate({ context: { org, repo, pr: args.prNumber }, committers, diff }, loaded.snapshot, deps.config, editions),
+  );
 
   const elected: Record<string, AgreementRef> = {};
   for (const a of loaded.snapshot.attributions ?? []) {
@@ -357,11 +380,13 @@ export async function handleAgreeCommand(
   const diff = await fetchPrStats(api, args.installationId, full, args.prNumber);
   snapshot.msaLogins = deps.config.instance.separateAgreement?.logins ?? [];
   snapshot.msaEmails = deps.config.instance.separateAgreement?.emails ?? [];
-  const verdict = evaluate(
-    { context: { org: full.split("/")[0] ?? "", repo: full.split("/")[1] ?? "", pr: args.prNumber }, committers: evalCommitters, ...(diff ? { diff } : {}) },
-    snapshot,
-    deps.config,
-    editions,
+  const verdict = await evaluateWithOrgMembership(api, deps.config, snapshot, () =>
+    evaluate(
+      { context: { org: full.split("/")[0] ?? "", repo: full.split("/")[1] ?? "", pr: args.prNumber }, committers: evalCommitters, ...(diff ? { diff } : {}) },
+      snapshot,
+      deps.config,
+      editions,
+    ),
   );
   const mine = verdict.committers.find((c) => c.login?.toLowerCase() === commenter);
 
@@ -397,7 +422,16 @@ export async function handleAgreeCommand(
     await postBotReply(api, args.installationId, full, args.prNumber, `@${commenter} no Organization CLA exists for "${command.company}". [See the organizations page](https://${deps.config.instance.portalHost}/organizations).`);
     return { replied: true, reason: "no such organization" };
   }
-  const onRoster = ocla.covered.some((r) => r.githubLogin.toLowerCase() === commenter);
+  const onRoster =
+    ocla.covered.some((r) => r.githubLogin.toLowerCase() === commenter) ||
+    // Coverage by GitHub-org membership (issue #16 item 4): designated
+    // under this OCLA by a resolved membership fact — the same coverage
+    // a named Schedule A row gives, so no join request either.
+    (snapshot.orgMembers ?? []).some(
+      (m) =>
+        m.login.toLowerCase() === commenter &&
+        (deps.config.coverage.orgMembership ?? {})[m.org.toLowerCase()]?.toLowerCase() === ocla.orgSlug.toLowerCase(),
+    );
   if (!onRoster) {
     if (!deps.requestJoin) {
       await postBotReply(api, args.installationId, full, args.prNumber, `@${commenter} you are not on ${ocla.orgSlug}'s Schedule A. The join queue is temporarily unavailable — ask ${ocla.orgSlug}'s Point of Contact to add you.`);
@@ -488,6 +522,28 @@ export async function handleMetaCommand(
     if (registry) {
       await postBotReply(deps.api, args.installationId, full, args.prNumber, `@${commenter} — this work is submitted under an existing Ribose agreement; the CLA process does not apply to you.`);
       return { replied: true, reason: "status: registry" };
+    }
+    // Coverage by GitHub-org membership (issue #16 item 4): consulted
+    // only now — the caller has no signature and no registry entry, so
+    // this is the "otherwise uncovered" case the design allows.
+    const orgMembership = deps.config.coverage.orgMembership;
+    if (orgMembership && Object.keys(orgMembership).length > 0) {
+      const facts = await resolveOrgMemberships(deps.api, orgMembership, [commenter]);
+      const designated = facts
+        .map((f) => orgMembership[f.org.toLowerCase()])
+        .find((slug) =>
+          slug &&
+          snapshot.oclas.some(
+            (o) =>
+              o.orgSlug.toLowerCase() === slug &&
+              o.edition.textSha256 === editions.ocla.textSha256 &&
+              !snapshot.revokedIds.includes(o.id),
+          ),
+        );
+      if (designated) {
+        await postBotReply(deps.api, args.installationId, full, args.prNumber, `@${commenter} — you are covered through the **${designated} Organization CLA**, designated by your GitHub org membership. No signature is needed from you.`);
+        return { replied: true, reason: "status: org-membership" };
+      }
     }
     await postBotReply(deps.api, args.installationId, full, args.prNumber, `@${commenter} — no live agreement is on record for you. Reply \`@ribose-cla agree\` and follow the link the check posts, or [sign in the portal](${portalBase}/icla).`);
     return { replied: true, reason: "status: none" };

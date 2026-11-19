@@ -39,7 +39,7 @@ export function checkRunBody(verdict: PrVerdict, portalBase: string, signingDocs
     if (c.status === "covered") {
       const via = c.underSeparateAgreement
         ? "**an existing Ribose agreement**"
-        : `**${c.path}**${c.agreement && "orgSlug" in c.agreement ? ` (${c.agreement.orgSlug} OCLA)` : ""}`;
+        : `**${c.path}**${c.agreement && "orgSlug" in c.agreement ? ` (${c.agreement.orgSlug} OCLA${c.viaOrgMembership ? " — designated by GitHub org membership" : ""})` : ""}`;
       const who = c.login === null ? (c.email ? `author email ${c.email}` : "an author email that matches no GitHub account") : `@${c.login}`;
       lines.push(`- ${who} — covered via ${via}`);
     } else if (c.status === "must-specify") {
@@ -111,8 +111,9 @@ export function commentBody(
     /** login -> the editions at play when the signer holds a stale signature */
     staleEditions?: Record<string, { signed: string; current: string }>;
     /** login -> the organization agreement at play when the person is on
-     *  the Schedule A of a superseded OCLA (issue #123) */
-    staleOclas?: Record<string, { orgSlug: string; signed: string; current: string }>;
+     *  the Schedule A of a superseded OCLA (issue #123), or was covered
+     *  by one through GitHub-org membership (issue #16 item 4) */
+    staleOclas?: Record<string, { orgSlug: string; signed: string; current: string; viaOrgMembership?: boolean }>;
   } = {},
 ): string {
   const rows: string[] = [];
@@ -123,7 +124,7 @@ export function commentBody(
       if (c.path === "allowlist") continue;
       rows.push(c.underSeparateAgreement
         ? `| ${who(c)} | this work is submitted under an existing Ribose agreement; the CLA process does not apply. |`
-        : `| ${who(c)} | covered (${c.path}${c.agreement && "orgSlug" in c.agreement ? ` — ${c.agreement.orgSlug}` : ""}) |`);
+        : `| ${who(c)} | covered (${c.path}${c.agreement && "orgSlug" in c.agreement ? ` — ${c.agreement.orgSlug}` : ""}${c.viaOrgMembership ? "; designated by GitHub org membership" : ""}) |`);
     } else if (c.status === "must-specify") {
       const links = (opts.attributionLinks?.[c.login ?? ""] ?? c.options.map((o) => ({ label: o.kind === "icla" ? `Individual CLA v${o.version}` : `${o.orgSlug} OCLA v${o.version}`, url: `${portalBase}/agreements` })))
         .map((l) => `[${l.label}](${l.url})`)
@@ -136,9 +137,11 @@ export function commentBody(
       const supersededOrg = c.login ? opts.staleOclas?.[c.login] : undefined;
       const what = stale
         ? `You signed the Individual CLA v${stale.signed}, and the current edition is v${stale.current}; the text changed, so a re-sign is needed`
-        : supersededOrg
-          ? `You are on the Schedule A of ${supersededOrg.orgSlug}'s Organization CLA v${supersededOrg.signed}, which the current edition v${supersededOrg.current} supersedes; the organization's signatory must re-execute it`
-          : "Ribose requires a signed agreement for every contribution";
+        : supersededOrg?.viaOrgMembership
+          ? `Your coverage under ${supersededOrg.orgSlug}'s Organization CLA comes from your GitHub org membership, and the edition you were covered by (v${supersededOrg.signed}) is superseded by v${supersededOrg.current}; the organization's signatory must re-execute it`
+          : supersededOrg
+            ? `You are on the Schedule A of ${supersededOrg.orgSlug}'s Organization CLA v${supersededOrg.signed}, which the current edition v${supersededOrg.current} supersedes; the organization's signatory must re-execute it`
+            : "Ribose requires a signed agreement for every contribution";
       rows.push(`| ${who(c)} | ${what}. [Sign the Individual CLA](${portalBase}/icla)${opts.signingDocsUrl ? ` ([how to sign](${opts.signingDocsUrl}))` : ""} or [find your organization](${portalBase}/organizations) — or reply \`@ribose-cla agree\` and follow the link the check posts. |`);
     }
   }
@@ -202,7 +205,8 @@ export function closingComment(
           : c.agreement && "orgSlug" in c.agreement
             ? `the ${c.agreement.orgSlug} OCLA v${c.agreement.version}`
             : `the Individual CLA v${(c.agreement as { version: string }).version}`;
-      return `- ${who(c)} — contributed under **${under}**`;
+      const how = c.viaOrgMembership && c.path === "ocla" ? " (designated by GitHub org membership)" : "";
+      return `- ${who(c)} — contributed under **${under}**${how}`;
     }
     if (c.status === "must-specify") return `- ${who(c)} — contributed under an election recorded during review`;
     return `- ${who(c)} — **merged without CLA coverage** (visible in history)`;

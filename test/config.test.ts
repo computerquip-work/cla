@@ -159,3 +159,31 @@ describe("sha helper sanity", () => {
     expect(web).toBe(shaSync("x"));
   });
 });
+
+describe("config: coverage by GitHub-org membership (issue #16 item 4)", () => {
+  const withOrgMembership = (block: string): string => VALID.replace("coverage:\n", `coverage:\n${block}`);
+
+  it("parses the map with lowercased orgs and slugs", async () => {
+    const r = await parseConfig(withOrgMembership("  org_membership:\n    Corp-Org: MTG-AG\n"), reader);
+    if ("errors" in r) throw new Error(`unexpected errors: ${JSON.stringify(r.errors)}`);
+    expect(r.config.coverage.orgMembership).toEqual({ "corp-org": "mtg-ag" });
+  });
+
+  it("absent and explicitly empty are both OFF", async () => {
+    const absent = await parseConfig(VALID, reader);
+    if ("errors" in absent) throw new Error("unexpected errors");
+    expect(absent.config.coverage.orgMembership).toBeUndefined();
+
+    const empty = await parseConfig(withOrgMembership("  org_membership: {}\n"), reader);
+    if ("errors" in empty) throw new Error("unexpected errors");
+    expect(empty.config.coverage.orgMembership).toBeUndefined();
+  });
+
+  it("fails closed: a non-map value or an empty slug is a gen-time error", async () => {
+    const notAMap = await parseConfig(withOrgMembership("  org_membership: [ a ]\n"), reader);
+    expect("errors" in notAMap && notAMap.errors.some((e) => e.path === "coverage.org_membership")).toBe(true);
+
+    const emptySlug = await parseConfig(withOrgMembership("  org_membership:\n    corp-org: \"\"\n"), reader);
+    expect("errors" in emptySlug && emptySlug.errors.some((e) => e.path === "coverage.org_membership.corp-org")).toBe(true);
+  });
+});

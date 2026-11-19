@@ -425,3 +425,169 @@ describe("kernel: duplicate live records fold to one agreement (rnp#2573)", () =
     expect(Object.keys(v.mustSpecify)).toEqual([]);
   });
 });
+
+describe("kernel: coverage by GitHub-org membership (issue #16 item 4)", () => {
+  // The transport resolves GitHub facts; this kernel only reads them.
+  // A membership DESIGNATES under a mapped, LIVE OCLA — the signature
+  // remains the coverage, and the path is a fallback: consulted only
+  // when no signature matched.
+  const memberCfg = (over: Partial<Config["coverage"]> = {}): Config =>
+    config({ orgMembership: { "corp-org": "mtg-ag" }, ...over });
+  const memberSnap = (over: Partial<StoreSnapshot> = {}): StoreSnapshot =>
+    snapshot({ orgMembers: [{ login: "newdev", org: "corp-org" }], ...over });
+
+  it("a member of a mapped org is covered under the live OCLA, flagged as membership", () => {
+    const v = evaluate(pr([login("newdev")]), memberSnap({ oclas: [ocla()] }), memberCfg(), EDITIONS);
+    expect(v.verdict).toBe("pass");
+    expect(v.committers[0]).toMatchObject({
+      status: "covered",
+      path: "ocla",
+      viaOrgMembership: true,
+      matchedBy: "login",
+      agreement: { kind: "ocla", version: "1.0", oclaId: "ocla-1", orgSlug: "mtg-ag" },
+    });
+  });
+
+  it("facts alone cover nobody: without the config map the login stays missing", () => {
+    const v = evaluate(pr([login("newdev")]), memberSnap({ oclas: [ocla()] }), config(), EDITIONS);
+    expect(v.committers[0]?.status).toBe("missing");
+  });
+
+  it("config alone covers nobody: without resolved facts the login stays missing", () => {
+    const v = evaluate(pr([login("newdev")]), snapshot({ oclas: [ocla()] }), memberCfg(), EDITIONS);
+    expect(v.committers[0]?.status).toBe("missing");
+  });
+
+  it("an org the config does not map designates nothing", () => {
+    const v = evaluate(
+      pr([login("newdev")]),
+      snapshot({ oclas: [ocla()], orgMembers: [{ login: "newdev", org: "other-org" }] }),
+      memberCfg(),
+      EDITIONS,
+    );
+    expect(v.committers[0]?.status).toBe("missing");
+  });
+
+  it("a stale OCLA designates nobody — the signature is still the coverage", () => {
+    const v = evaluate(
+      pr([login("newdev")]),
+      memberSnap({ oclas: [ocla({ edition: { kind: "ocla", version: "1.0", textSha256: "othersha" } })] }),
+      memberCfg(),
+      EDITIONS,
+    );
+    expect(v.committers[0]?.status).toBe("missing");
+  });
+
+  it("a revoked OCLA designates nobody", () => {
+    const v = evaluate(
+      pr([login("newdev")]),
+      memberSnap({ oclas: [ocla()], revokedIds: ["ocla-1"] }),
+      memberCfg(),
+      EDITIONS,
+    );
+    expect(v.committers[0]?.status).toBe("missing");
+  });
+
+  it("the fallback is a fallback: a signature wins and membership never adds ambiguity", () => {
+    const v = evaluate(
+      pr([login("newdev")]),
+      memberSnap({ iclas: [icla({ githubLogin: "newdev" })], oclas: [ocla()] }),
+      memberCfg(),
+      EDITIONS,
+    );
+    expect(v.committers[0]).toMatchObject({ status: "covered", path: "icla" });
+    expect(v.committers[0]).not.toHaveProperty("viaOrgMembership");
+    expect(Object.keys(v.mustSpecify)).toEqual([]);
+  });
+
+  it("a named Schedule A row wins over membership for the same OCLA", () => {
+    const v = evaluate(
+      pr([login("tj-91")]),
+      memberSnap({ oclas: [ocla()] }),
+      memberCfg(),
+      EDITIONS,
+    );
+    expect(v.committers[0]).toMatchObject({ status: "covered", path: "ocla" });
+    expect(v.committers[0]).not.toHaveProperty("viaOrgMembership");
+  });
+
+  it("two mapped orgs with two live OCLAs read as must-specify, like any two paths", () => {
+    const v = evaluate(
+      pr([login("newdev")]),
+      snapshot({
+        oclas: [ocla(), ocla({ id: "ocla-2", orgSlug: "other-corp", covered: [] })],
+        orgMembers: [
+          { login: "newdev", org: "corp-org" },
+          { login: "newdev", org: "other-org" },
+        ],
+      }),
+      config({ orgMembership: { "corp-org": "mtg-ag", "other-org": "other-corp" } }),
+      EDITIONS,
+    );
+    expect(v.verdict).toBe("pass");
+    expect(v.mustSpecify["newdev"]).toHaveLength(2);
+    expect(v.mustSpecify["newdev"]?.map((o) => (o.kind === "ocla" ? o.orgSlug : o.kind))).toEqual(["mtg-ag", "other-corp"]);
+  });
+
+  it("an unlinked commit reaches membership through its verified email", () => {
+    const v = evaluate(
+      pr([{ login: null, email: "newdev@example.com" }]),
+      memberSnap({
+        oclas: [ocla()],
+        verifiedEmails: [{ login: "newdev", email: "newdev@example.com" }],
+      }),
+      memberCfg(),
+      EDITIONS,
+    );
+    expect(v.committers[0]).toMatchObject({ status: "covered", path: "ocla", viaOrgMembership: true, matchedBy: "email" });
+  });
+
+  it("an unlinked commit with no resolvable identity is never membership-checked", () => {
+    const v = evaluate(
+      pr([{ login: null, email: "stranger@example.com" }]),
+      memberSnap({ oclas: [ocla()] }),
+      memberCfg(),
+      EDITIONS,
+    );
+    expect(v.committers[0]?.status).toBe("missing");
+    expect(v.missing).toEqual(["email:stranger@example.com"]);
+  });
+});
+
+describe("kernel: an election resolves a membership must-specify (issue #16 item 4)", () => {
+  it("the elected OCLA is covered, and the elected path keeps its membership flag", () => {
+    const snap = snapshot({
+      oclas: [ocla(), ocla({ id: "ocla-2", orgSlug: "other-corp", covered: [] })],
+      orgMembers: [
+        { login: "newdev", org: "corp-org" },
+        { login: "newdev", org: "other-org" },
+      ],
+      attributions: [{ repo: "rnpgp/rnp", pr: 1, login: "newdev", agreement: { kind: "ocla", version: "1.0", oclaId: "ocla-2", orgSlug: "other-corp" } }],
+    });
+    const cfg = config({ orgMembership: { "corp-org": "mtg-ag", "other-org": "other-corp" } });
+    const v = evaluate(pr([login("newdev")]), snap, cfg, EDITIONS);
+    expect(v.committers[0]).toMatchObject({
+      status: "covered",
+      path: "ocla",
+      viaOrgMembership: true,
+      agreement: { kind: "ocla", oclaId: "ocla-2", orgSlug: "other-corp" },
+    });
+    expect(Object.keys(v.mustSpecify)).toEqual([]);
+  });
+
+  it("an election naming a non-member's agreement does not resolve the membership question", () => {
+    const snap = snapshot({
+      oclas: [ocla(), ocla({ id: "ocla-2", orgSlug: "other-corp", covered: [] })],
+      orgMembers: [
+        { login: "newdev", org: "corp-org" },
+        { login: "newdev", org: "other-org" },
+      ],
+      // the election points at an OCLA the facts do not designate under
+      attributions: [{ repo: "rnpgp/rnp", pr: 1, login: "newdev", agreement: { kind: "icla", version: "1.0" } }],
+    });
+    const cfg = config({ orgMembership: { "corp-org": "mtg-ag", "other-org": "other-corp" } });
+    const v = evaluate(pr([login("newdev")]), snap, cfg, EDITIONS);
+    // a dead/mismatched election never invents coverage: still a question
+    expect(v.committers[0]?.status).toBe("must-specify");
+  });
+});

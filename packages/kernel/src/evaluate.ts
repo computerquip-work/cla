@@ -35,6 +35,13 @@ export type Config = {
     /** The proportionality control (issue #58): a PR under BOTH
      *  thresholds skips CLA enforcement. OFF when absent. */
     minimalChange?: { files: number; codeLines: number };
+    /** Coverage by GitHub-org membership (issue #16 item 4): a GitHub
+     *  org login -> the OCLA slug whose Schedule A it DESIGNATES for —
+     *  the GitHub-org alternative to a named row. Keys are normalized
+     *  lowercase at parse. OFF when absent (the default), and never
+     *  coverage by itself: the mapped OCLA must be live, or there is
+     *  nothing to designate under. */
+    orgMembership?: Record<string, string>;
   };
 };
 
@@ -85,6 +92,13 @@ export type StoreSnapshot = {
    *  commit; the normal coverage paths then decide — the verified email
    *  is identity, never coverage by itself. */
   verifiedEmails?: Array<{ login: string; email: string }>;
+  /** GitHub-org memberships the transport resolved for the committers
+   *  that would otherwise be uncovered (issue #16 item 4): plain facts
+   *  (login is a member of org), never fetched by this kernel. The
+   *  config's orgMembership map turns a membership into DESIGNATION
+   *  under that org's live OCLA — the OCLA signature remains the
+   *  coverage; membership only says who it covers. */
+  orgMembers?: Array<{ login: string; org: string }>;
 };
 
 // ---- outputs ----
@@ -94,7 +108,7 @@ export type AgreementRef =
   | { kind: "ocla"; version: string; oclaId: string; orgSlug: string };
 
 export type CommitterVerdict =
-  | { login: string | null; status: "covered"; path: "allowlist" | "icla" | "ocla" | "separate-agreement"; agreement?: AgreementRef; matchedBy: "login" | "email"; underSeparateAgreement?: boolean; email?: string | null }
+  | { login: string | null; status: "covered"; path: "allowlist" | "icla" | "ocla" | "separate-agreement"; agreement?: AgreementRef; matchedBy: "login" | "email"; underSeparateAgreement?: boolean; viaOrgMembership?: boolean; email?: string | null }
   | { login: string | null; status: "must-specify"; options: AgreementRef[]; matchedBy: "login" | "email" }
   | { login: string | null; status: "missing"; email?: string | null };
 
@@ -164,6 +178,34 @@ function collectPaths(
   return out;
 }
 
+/** Coverage by GitHub-org membership (issue #16 item 4): the transport
+ *  resolved which CONFIGURED GitHub orgs this identity is a member of;
+ *  a membership DESIGNATES the identity under that org's live OCLA —
+ *  the GitHub-org alternative to a named Schedule A row. The signature
+ *  remains the coverage: a stale or revoked OCLA designates nobody,
+ *  and without the config map or the resolved facts this returns
+ *  nothing. Consulted by evaluate() only when no signature matched. */
+function collectMembershipPaths(
+  identity: string,
+  snap: StoreSnapshot,
+  cfg: Config,
+  editions: Editions,
+  revoked: Set<string>,
+): { path: "ocla"; agreement?: AgreementRef; viaOrgMembership?: boolean }[] {
+  const map = cfg.coverage.orgMembership;
+  if (!map || !snap.orgMembers?.length) return [];
+  const out: { path: "ocla"; agreement?: AgreementRef; viaOrgMembership?: boolean }[] = [];
+  for (const m of snap.orgMembers) {
+    if (normalize(m.login) !== normalize(identity)) continue;
+    const slug = Object.entries(map).find(([org]) => normalize(org) === normalize(m.org))?.[1];
+    if (!slug) continue;
+    const o = snap.oclas.find((r) => normalize(r.orgSlug) === normalize(slug) && isLive(r, editions.ocla, revoked));
+    if (!o) continue;
+    out.push({ path: "ocla", agreement: oclaRef(o), viaOrgMembership: true });
+  }
+  return out;
+}
+
 export function evaluate(pr: PrInput, snap: StoreSnapshot, cfg: Config, editions: Editions): PrVerdict {
   // The proportionality control runs before coverage evaluation: a PR
   // under BOTH thresholds skips enforcement, visibly (issue #58).
@@ -215,7 +257,7 @@ export function evaluate(pr: PrInput, snap: StoreSnapshot, cfg: Config, editions
       continue;
     }
 
-    const paths: { path: "icla" | "ocla"; agreement?: AgreementRef }[] = [];
+    const paths: { path: "icla" | "ocla"; agreement?: AgreementRef; viaOrgMembership?: boolean }[] = [];
     let matchedBy: "login" | "email" = byLogin ? "login" : "email";
     const resolvedLogin = identity;
 
@@ -225,6 +267,19 @@ export function evaluate(pr: PrInput, snap: StoreSnapshot, cfg: Config, editions
     if (paths.length === 0 && c.email) {
       paths.push(...collectPaths("email", c.email, snap, editions, revoked));
       matchedBy = "email";
+    }
+    // GitHub-org membership is the FALLBACK of last resort (issue #16
+    // item 4): consulted only when no signature path matched, so an
+    // ICLA or a named Schedule A row is never ambiguous with it. Two
+    // mapped orgs -> two OCLAs -> must-specify, like any two paths.
+    if (paths.length === 0 && identity) {
+      const memberPaths = collectMembershipPaths(identity, snap, cfg, editions, revoked);
+      if (memberPaths.length > 0) {
+        // The membership fact is keyed by login: an unlinked commit only
+        // reaches it through its verified email, so say so.
+        matchedBy = byLogin ? "login" : "email";
+        paths.push(...memberPaths);
+      }
     }
 
     // Duplicate live records of the SAME agreement (a double-POST race in
@@ -246,7 +301,7 @@ export function evaluate(pr: PrInput, snap: StoreSnapshot, cfg: Config, editions
     // an ICLA/OCLA path is never flagged as separate-agreement coverage.
     if (folded.length === 1) {
       const p = folded[0]!;
-      committers.push({ login: resolvedLogin, status: "covered", path: p.path, agreement: p.agreement, matchedBy, ...(c.email && matchedBy === "email" ? { email: c.email } : {}) });
+      committers.push({ login: resolvedLogin, status: "covered", path: p.path, agreement: p.agreement, matchedBy, ...(p.viaOrgMembership ? { viaOrgMembership: true } : {}), ...(c.email && matchedBy === "email" ? { email: c.email } : {}) });
     } else if (folded.length > 1) {
       const options = folded.map((p) => p.agreement!).filter(Boolean);
       // A stored election for THIS (repo, pr, login) resolves the ambiguity
@@ -261,7 +316,7 @@ export function evaluate(pr: PrInput, snap: StoreSnapshot, cfg: Config, editions
         : undefined;
       const match = chosen ? folded.find((p) => agreementKey(p.agreement!) === agreementKey(chosen.agreement)) : undefined;
       if (match) {
-        committers.push({ login: resolvedLogin, status: "covered", path: match.path, agreement: match.agreement, matchedBy, ...(c.email && matchedBy === "email" ? { email: c.email } : {}) });
+        committers.push({ login: resolvedLogin, status: "covered", path: match.path, agreement: match.agreement, matchedBy, ...(match.viaOrgMembership ? { viaOrgMembership: true } : {}), ...(c.email && matchedBy === "email" ? { email: c.email } : {}) });
       } else if (resolvedLogin) {
         committers.push({ login: resolvedLogin, status: "must-specify", options, matchedBy });
         mustSpecify[resolvedLogin] = options;

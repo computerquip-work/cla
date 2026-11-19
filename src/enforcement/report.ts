@@ -4,6 +4,7 @@ import type { EnforcementDeps } from "./handler";
 import { kernelEditions } from "../config";
 import { loadSnapshot } from "../store/load";
 import { makeListRecords } from "../store/github-store";
+import { resolveOrgMemberships } from "./org-membership";
 
 /**
  * The repo-centric coverage report (issue #88): for every installed
@@ -41,6 +42,9 @@ export type ContributorRow = {
   /** Which OCLA covers the person (the org slug) — set only on an
    *  `ocla` path; an ICLA row names no organization. */
   org_slug?: string;
+  /** Covered by GitHub-org membership under the OCLA rather than a
+   *  named Schedule A row (issue #16 item 4). */
+  via_org_membership?: boolean;
   edition?: string;
   matched_by?: "login" | "email";
   /** The login is covered under a separate written agreement: the click
@@ -199,6 +203,7 @@ export function repoRow(
           state: "signed",
           path: v.path,
           ...(v.agreement && "orgSlug" in v.agreement ? { org_slug: v.agreement.orgSlug } : {}),
+          ...(v.viaOrgMembership ? { via_org_membership: true } : {}),
           edition: v.agreement?.version,
           matched_by: v.matchedBy,
           ...(v.underSeparateAgreement ? { under_separate_agreement: true } : {}),
@@ -245,6 +250,10 @@ export async function repoCoverageStep(
   snapshot.msaLogins = deps.config.instance.separateAgreement?.logins ?? [];
 
   const repos: RepoCoverageRow[] = [];
+  // Logins already asked about (member or not) this step: a negative
+  // answer produces no fact, so without this the same outstanding
+  // login would be re-queried for every repository in the chunk.
+  const askedLogins = new Set<string>();
   for (const repo of slice) {
     // The inventory fact is about the repo, not about its people: fetch it
     // even for excluded repos, where the operator still asks what the
@@ -270,7 +279,36 @@ export async function repoCoverageStep(
       });
       continue;
     }
-    repos.push(repoRow(repo, true, JSON.parse(res.body), snapshot, deps.config, editions, window, license));
+    const commits = JSON.parse(res.body);
+    let row = repoRow(repo, true, commits, snapshot, deps.config, editions, window, license);
+    // Coverage by GitHub-org membership (issue #16 item 4): the report
+    // answers with the same facts the enforcement path uses, or it would
+    // send the operator chasing signatures from people who hold none.
+    // Only outstanding/stale logins are asked about — the "otherwise
+    // uncovered" rule — and each login is asked once per step.
+    const orgMembership = deps.config.coverage.orgMembership;
+    if (orgMembership && Object.keys(orgMembership).length > 0) {
+      const asked = row.contributors
+        .filter((r) => (r.state === "outstanding" || r.state === "stale") && r.login && !askedLogins.has(r.login.toLowerCase()))
+        .map((r) => r.login!);
+      for (const l of asked) askedLogins.add(l.toLowerCase());
+      if (asked.length > 0) {
+        const facts = await resolveOrgMemberships(deps.api, orgMembership, asked);
+        const prior = snapshot.orgMembers ?? [];
+        const seen = new Set(prior.map((f) => `${f.login.toLowerCase()}|${f.org.toLowerCase()}`));
+        for (const f of facts) {
+          const key = `${f.login.toLowerCase()}|${f.org.toLowerCase()}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            prior.push(f);
+          }
+        }
+        snapshot.orgMembers = prior;
+        // Re-evaluate: a fact may cover someone the first pass called outstanding.
+        row = repoRow(repo, true, commits, snapshot, deps.config, editions, window, license);
+      }
+    }
+    repos.push(row);
   }
 
   const consumed = cursor.offset + slice.length;

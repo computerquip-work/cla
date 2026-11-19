@@ -36,6 +36,13 @@ code edit.
   sign, are never asked to, and their merged work is attributed only as
   "submitted under an existing Ribose agreement; the CLA process does not
   apply" — the instrument and any classification stay private.
+- **Coverage by GitHub-org membership** (opt-in, `coverage.org_membership`):
+  an instance may map a GitHub organization to an OCLA slug, and a
+  committer who is a member of that GitHub organization is *designated*
+  under that OCLA — the GitHub-org alternative to a named Schedule A
+  row. It never stands alone: consulted only when no signature covers
+  the committer, and the mapped OCLA must be live, or it designates
+  nobody.
 
 ## The four-repo architecture
 

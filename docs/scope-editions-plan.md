@@ -167,7 +167,9 @@ Use a placeholder name in this plan (`scope`); counsel owns the real name
 ### 4.4 Precedence (D4/D5)
 
 Current order (kernel comment): **registry → allowlist → current ICLA → current
-OCLA**; multiple live paths ⇒ must-specify, never a guess.
+OCLA → (fallback, only when nothing matched) GitHub-org membership under a
+mapped live OCLA (#16 item 4)**; multiple live paths ⇒ must-specify, never a
+guess.
 
 With a scope, the table below is the decision space. "Additional" is the
 recommended reading of the owner's position ("contributors accept Ribose's full

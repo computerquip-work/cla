@@ -35,6 +35,9 @@ export type AppConfig = {
   coverage: {
     allowlist: { global: string[]; perOrg: Record<string, string[]> };
     minimalChange?: { files: number; codeLines: number };
+    /** Coverage by GitHub-org membership (issue #16 item 4): a GitHub
+     *  org login -> the OCLA slug it designates under. Absent = OFF. */
+    orgMembership?: Record<string, string>;
     reposWithoutCla: string[]; // "org/name"
     commentSigning: { automatic: boolean };
     notify: { digestThreshold: number; from: string };
@@ -218,6 +221,28 @@ export async function parseConfig(yamlText: string, readLegal: LegalReader): Pro
     errors.push({ path: "coverage.minimal_change", message: "both files and code_lines must be numeric" });
   }
   const commentSigning = obj(coverage["comment_signing"]);
+  // Coverage by GitHub-org membership (issue #16 item 4): a GitHub org
+  // login -> the OCLA slug its members are designated under. Absent =
+  // OFF (the default); an explicitly empty map is also OFF. Keys and
+  // slugs normalize to lowercase (the kernel compares lowercased).
+  const orgMemRaw = coverage["org_membership"];
+  let orgMembership: Record<string, string> | undefined;
+  if (orgMemRaw !== undefined && orgMemRaw !== null) {
+    if (typeof orgMemRaw !== "object" || Array.isArray(orgMemRaw)) {
+      errors.push({ path: "coverage.org_membership", message: "must be a mapping of GitHub org -> OCLA slug" });
+    } else {
+      const map: Record<string, string> = {};
+      for (const [org, slug] of Object.entries(orgMemRaw as Record<string, unknown>)) {
+        const s = str(slug);
+        if (!org.trim() || !s) {
+          errors.push({ path: `coverage.org_membership.${org}`, message: "entries must be a non-empty OCLA slug" });
+          continue;
+        }
+        map[org.trim().toLowerCase()] = s.toLowerCase();
+      }
+      if (Object.keys(map).length > 0) orgMembership = map;
+    }
+  }
   const notify = obj(coverage["notify"]);
   const digestThreshold = num(notify["digest_threshold"]) ?? 10;
   const notifyFrom = str(notify["from"]);
@@ -245,6 +270,7 @@ export async function parseConfig(yamlText: string, readLegal: LegalReader): Pro
       coverage: {
         allowlist: { global: lowerAll(allowRaw["global"]), perOrg },
         ...(minimalChange ? { minimalChange } : {}),
+        ...(orgMembership ? { orgMembership } : {}),
         reposWithoutCla,
         commentSigning: { automatic: bool(commentSigning["automatic"]) ?? false },
         notify: { digestThreshold, from: notifyFrom ?? `no-reply@${portalHost}` },
